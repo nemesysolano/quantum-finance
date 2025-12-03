@@ -1,0 +1,90 @@
+import pandas as pd
+import yfinance as yf
+import os
+import re
+import numpy as np
+from typing import Callable, Union
+
+from qf.market.augmentation import add_breaking_gap, add_slow_trend_run, add_structural_direction
+
+def read_csv(path):
+    historical_data = pd.read_csv(path, parse_dates=True, date_format='%Y-%m-%d %H:%M:%S', index_col='Date')
+    return historical_data
+
+def remove_timezone_from_json_dates(file_path):
+    if not os.path.exists(file_path):
+        print(f"File not found: {file_path}")
+        return
+
+    with open(file_path, 'r') as f:
+        source = f.read()
+        modified = re.sub(r'(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})(?:(?:\+|-)\d{2}:\d{2})', r'\1', source)
+
+    with open(file_path, 'w') as f:
+        f.writelines(modified)
+
+def add_low_high_average(historical_data):
+    historical_data['Low_High_Avg'] = (historical_data['Low'] + historical_data['High']) / 2
+
+def import_market_data(symbol):    
+    module_dir = os.path.dirname(__file__)
+    data_dir = os.path.join(module_dir, 'data')
+    output_path = os.path.join(data_dir, f"{symbol}.csv")
+
+    if not os.path.exists(data_dir):
+        os.makedirs(data_dir)
+
+    if not os.path.exists(output_path):
+        ticker = yf.Ticker(symbol)        
+        historical_data = ticker.history(period="5y", interval="1d")  
+        add_low_high_average(historical_data)
+        historical_data.to_csv(output_path)        
+
+        remove_timezone_from_json_dates(output_path)
+        historical_data = read_csv(output_path)
+        add_structural_direction(historical_data)
+        add_slow_trend_run(historical_data)
+        add_breaking_gap(historical_data)
+
+        historical_data.to_csv(output_path)
+        return historical_data
+
+
+    return read_csv(output_path)
+
+def import_market_all_data():    
+    module_dir = os.path.dirname(__file__)
+    stock_listing_file = os.path.join(module_dir, 'stocks.txt')
+
+    with open(stock_listing_file, 'r') as f:
+        symbols = [line.strip() for line in f]
+    
+    for symbol in symbols:
+        import_market_data(symbol)
+
+def read_train_val_test(symbol):
+    module_dir = os.path.dirname(__file__)
+    data_dir = os.path.join(module_dir, 'data')
+    output_path = os.path.join(data_dir, f"{symbol}.csv")
+    historical_data = read_csv(output_path)
+    
+    n = len(historical_data)
+    train = historical_data[0:int(n*0.7)]
+    val = historical_data[int(n*0.7):int(n*0.9)]
+    test = historical_data[int(n*0.9):]
+    return train, val, test
+
+def read_train_val(symbol):
+    module_dir = os.path.dirname(__file__)
+    data_dir = os.path.join(module_dir, 'data')
+    output_path = os.path.join(data_dir, f"{symbol}.csv")
+    historical_data = read_csv(output_path)
+    n = len(historical_data)
+    train_end = int(n * 0.75)
+    train = historical_data[:train_end]
+    val = historical_data[train_end:]
+    return train, val
+
+
+                            
+    

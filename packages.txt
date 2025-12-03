@@ -1,0 +1,10 @@
+pandas
+numpy
+astroquery
+yfinance
+matplotlib
+mplfinance
+scikit-learn
+mlx
+tensorflow-macos
+tensorflow-metal
