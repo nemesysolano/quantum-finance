@@ -5,7 +5,7 @@ import re
 import numpy as np
 from typing import Callable, Union
 
-from qf.market.augmentation import add_breaking_gap, add_slow_trend_run, add_structural_direction
+from qf.market.augmentation import add_breaking_gap, add_directional_probabilities, add_fast_swing_ratio, add_fast_trend_run, add_last_opposite, add_price_volume_strength_oscillator, add_relative_volume, add_slow_swing_ratio, add_slow_trend_run, add_structural_direction
 
 def read_csv(path):
     historical_data = pd.read_csv(path, parse_dates=True, date_format='%Y-%m-%d %H:%M:%S', index_col='Date')
@@ -42,10 +42,18 @@ def import_market_data(symbol):
 
         remove_timezone_from_json_dates(output_path)
         historical_data = read_csv(output_path)
+        add_relative_volume(ticker, historical_data)
         add_structural_direction(historical_data)
         add_slow_trend_run(historical_data)
         add_breaking_gap(historical_data)
-
+        add_fast_trend_run(historical_data)
+        add_fast_swing_ratio(historical_data)
+        add_last_opposite(historical_data)
+        add_slow_swing_ratio(historical_data)
+        add_directional_probabilities(historical_data)
+        add_price_volume_strength_oscillator(historical_data, "High")
+        add_price_volume_strength_oscillator(historical_data, "Close")
+        add_price_volume_strength_oscillator(historical_data, "Low")        
         historical_data.to_csv(output_path)
         return historical_data
 
@@ -85,6 +93,9 @@ def read_train_val(symbol):
     val = historical_data[train_end:]
     return train, val
 
-
-                            
-    
+def create_train_val_test(historical_data):
+    n = len(historical_data)
+    train = historical_data[0:int(n*0.7)]
+    val = historical_data[int(n*0.7):int(n*0.9)]
+    test = historical_data[int(n*0.9):]
+    return train, val, test

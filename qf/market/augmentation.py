@@ -1,112 +1,338 @@
 import numpy as np
 import pandas as pd
 
-import numpy as np
-import pandas as pd
+# Ensure this import exists in your project structure
+from qf.stats.normalizers import default_quantization_delta 
 
-from qf.stats.normalizers import quantize
-
-def add_structural_direction(historical_data):
-    high_prices = historical_data['High']
-    low_prices = historical_data['Low']
-    num_rows = len(historical_data)
-    structural_direction = np.full(num_rows, np.nan)
-
-    for i in range(1, num_rows):
-        h_t = high_prices.iloc[i]
-        h_t_minus_1 = high_prices.iloc[i-1]
-        l_t = low_prices.iloc[i]
-        l_t_minus_1 = low_prices.iloc[i-1]
-
-        if h_t > h_t_minus_1 and l_t >= l_t_minus_1:
-            structural_direction[i] = 1
-
-        elif l_t < l_t_minus_1 and h_t <= h_t_minus_1:
-            structural_direction[i] = -1
-
-        else:
-            structural_direction[i] = structural_direction[i-1]
-
-    historical_data['structural_direction'] = structural_direction
-    historical_data.dropna(inplace=True)
+def add_structural_direction(historical_data: pd.DataFrame) -> pd.DataFrame:
+    """
+    Adds the structural direction column (S_d) to the DataFrame.
+    """
+    df = historical_data
     
-def add_slow_trend_run(historical_data):
-    close_prices = historical_data['Close']
-    structural_directions = historical_data['structural_direction']
-    num_rows = len(historical_data)
+    # Vectorized comparison for efficiency
+    prev_high = df['High'].shift(1)
+    prev_low = df['Low'].shift(1)
+    
+    conditions = [
+        (df['High'] > prev_high) & (df['Low'] >= prev_low), # Ascending
+        (df['Low'] < prev_low) & (df['High'] <= prev_high)  # Descending
+    ]
+    choices = [1, -1]
+    
+    # default=np.nan implies 'Continuation' initially
+    df['Sd'] = np.select(conditions, choices, default=np.nan)
+    
+    # Fill NaNs with the previous valid value (Continuation logic)
+    df['Sd'] = df['Sd'].ffill().fillna(0)
+    
+    return df
+
+def add_slow_trend_run(historical_data: pd.DataFrame) -> pd.DataFrame:
+    """
+    Calculates the Slow Trend Run (Rs).
+    Rs(t) = c(t) - c(t_s - 1)
+    """
+    # Avoid SettingWithCopy warnings
+    df = historical_data
+    close_prices = df['Close'].values
+    structural_directions = df['Sd'].values
+    num_rows = len(df)
 
     slow_trend_run = np.full(num_rows, np.nan)
     t_s = -1  # Start index of the slow trend
 
+    # Iterating from 1 because we need i-1
     for i in range(1, num_rows):
-        sd_t = structural_directions.iloc[i]
-        sd_t_minus_1 = structural_directions.iloc[i-1]
+        sd_t = structural_directions[i]
+        sd_t_minus_1 = structural_directions[i-1]
 
         # A new slow trend starts when the structural direction changes.
-        # We also need to handle the initial NaN values.
-        if sd_t != sd_t_minus_1 and not np.isnan(sd_t):
+        if sd_t != sd_t_minus_1:
             t_s = i
 
-        # Calculate slow trend run if t_s is set and we can access c_{t_s-1}
+        # Calculate slow trend run if t_s is set validly
+        # We need t_s > 0 to safely access close_prices[t_s - 1]
         if t_s > 0:
-            slow_trend_run[i] = close_prices.iloc[i] - close_prices.iloc[t_s - 1]
+            slow_trend_run[i] = close_prices[i] - close_prices[t_s - 1]
 
-    historical_data['slow_trend_run'] = slow_trend_run
-    historical_data.dropna(inplace=True)
+    df['Rs'] = slow_trend_run
+    df.dropna(inplace=True)
+    return df
 
-def add_breaking_gap(historical_data):
-    # Assuming the slow trend direction is determined by the sign of the current slow_trend_run or structural_direction (Sd(t))
-    # Since the slow_trend_run is R_s(t) = c(t) - c(t_s-1), its sign indicates the current trend.
+def add_fast_trend_run(historical_data: pd.DataFrame) -> pd.DataFrame:
+    """
+    Calculates and adds the Fast Trend Run (Rf) to the DataFrame.
+    """
+    df = historical_data
+    close_prices = df['Close'].values
+    num_rows = len(df)
     
-    high_prices = historical_data['High']
-    low_prices = historical_data['Low']
-    slow_trend_run = historical_data['slow_trend_run']
-    num_rows = len(historical_data)
+    fast_trend_run = np.full(num_rows, np.nan)
+    t_f = 0  # Start index of the fast trend
 
-    breaking_gap = np.full(num_rows, 0.0)  # Initialize all to 0.0 (The first one is zero)
+    # Logic:
+    # If direction changes at index i (relative to i-1), the new run starts from i-1.
+    
+    if num_rows > 0:
+        fast_trend_run[0] = 0 # Initialize first element
 
-    # Start loop at 2 because the logic relies on t-2
-    for i in range(2, num_rows):
+    for i in range(1, num_rows):
+        # We need at least 3 points to compare two deltas (i vs i-1, and i-1 vs i-2)
+        if i > 1:
+            delta_current = close_prices[i] - close_prices[i-1]
+            delta_prev = close_prices[i-1] - close_prices[i-2]
+            
+            # If signs differ, direction changed.
+            # Using np.sign ensures we catch + to - or - to +
+            if np.sign(delta_current) != np.sign(delta_prev):
+                t_f = i - 1
         
-        # Determine the slow trend direction at t
-        # A positive slow trend run (R_s(t) > 0) implies an ascending trend.
-        # A negative slow trend run (R_s(t) < 0) implies a descending trend.
-        # The direction is implicit in the slow_trend_run R_s(t)
+        # Rf(t) = c(t) - c(t_f)
+        fast_trend_run[i] = close_prices[i] - close_prices[t_f]
+
+    df['Rf'] = fast_trend_run
+    df.dropna(inplace=True)
+    return df
+
+def add_breaking_gap(historical_data: pd.DataFrame, quantization_delta: float = default_quantization_delta) -> pd.DataFrame:
+    """
+    Calculates and adds the Breaking Gap (G) to the DataFrame.
+    Includes logic for linear decay based on the time elapsed since the last breach (k).
+    """
+    df = historical_data
+    index = df.index
+    num_rows = len(df)
+    gaps = np.zeros(num_rows)
+    
+    slow_trend_direction = df['Sd'].values
+    low = df['Low'].values
+    high = df['High'].values
+    
+    last_breach_val = 0.0 # G_b
+    k = 0 # Counter for decay bars
+
+    # Start at 2 because we look back at t-2
+    for idx in range(2, num_rows):
+        # t is current, t-1 is prev, t-2 is 2 bars ago
+        # Trend check uses t-1 (trend established before current bar)
+        trend_dir = slow_trend_direction[idx-1]
         
-        current_slow_trend_run = slow_trend_run.iloc[i]
+        is_violation = False
+        current_gap = 0.0
+
+        # Ascending trend violation (Break Low)
+        if trend_dir > 0 and low[idx] < low[idx-2]:
+            current_gap = low[idx-2] - low[idx]
+            is_violation = True
+
+        # Descending trend violation (Break High)
+        elif trend_dir < 0 and high[idx] > high[idx-2]:
+            current_gap = high[idx] - high[idx-2]
+            is_violation = True
+
+        if is_violation:
+            gaps[idx] = current_gap
+            last_breach_val = current_gap # Set G_b
+            k = 1 # Reset counter (k=1 for first bar after breach, effectively)
+        else:
+            # Decay Logic: G(t) = max(G_b - k * Q, 0)
+            gaps[idx] = max(last_breach_val - (k * quantization_delta), 0.0)
+            k += 1
+
+    df['G'] = gaps    
+    return df
+
+def add_fast_swing_ratio(historical_data: pd.DataFrame) -> pd.DataFrame:
+    """
+    Calculates Fast Swing Ratio (Sf).
+    Sf(t) = min(2, (G(t) / |Rf(t)|)^2)
+    """
+    df = historical_data
+    breaking_gap = df['G']
+    fast_trend_run_abs = df['Rf'].abs()
+
+    # Vectorized calculation handling division by zero
+    ratio_squared = np.divide(
+        breaking_gap, 
+        fast_trend_run_abs, 
+        out=np.zeros_like(breaking_gap), 
+        where=fast_trend_run_abs!=0
+    ) ** 2
+    
+    df['Sf'] = np.minimum(2, ratio_squared)
+    # Note: We usually don't dropna here unless gaps/Rf generated NaNs
+    return df
+
+def add_last_opposite(historical_data: pd.DataFrame) -> pd.DataFrame:
+    """
+    Calculates the last opposite slow trend run (R*).
+    Optimized to O(N) complexity.
+    """
+    df = historical_data
+    rs = df['Rs'].values
+    num_rows = len(df)
+    rs_star = np.full(num_rows, np.nan)
+
+    last_positive_run = np.nan
+    last_negative_run = np.nan
+
+    for i in range(num_rows):
+        current_val = rs[i]
         
-        gap = 0.0 # Default value if violation occurs (will be overwritten)
+        # If current run is Positive
+        if current_val > 0:
+            rs_star[i] = last_negative_run # The last opposite was negative
+            last_positive_run = current_val # Update last seen positive
+            
+        # If current run is Negative
+        elif current_val < 0:
+            rs_star[i] = last_positive_run # The last opposite was positive
+            last_negative_run = current_val # Update last seen negative
+            
+        # If current run is 0, we generally carry forward logic or do nothing
+        # depending on specific needs. Here we leave as nan or previous.
+        # Assuming 0 doesn't update "direction".
+        else:
+             # Fallback if needed, or leave NaN. 
+             # Logic usually implies strict >0 or <0 for trend runs.
+             pass
 
-        # --- Trend Violation for Slow Ascending Trends ---
-        # If the slow trend is ascending (R_s(t) > 0)
-        if current_slow_trend_run > 0:
-            # Violation occurs when l(t) < l(t-2)
-            if low_prices.iloc[i] < low_prices.iloc[i-2]:
-                # G(t) = l(t-2) - l(t)
-                gap = low_prices.iloc[i-2] - low_prices.iloc[i]
-            else:
-                # No violation: G(t) is the previous breaking gap G(t-1)
-                gap = breaking_gap[i-1]
+    df['R*'] = rs_star
+    df.dropna(inplace=True)
+    return df
 
-        # --- Trend Violation for Slow Descending Trends ---
-        # If the slow trend is descending (R_s(t) < 0)
-        elif current_slow_trend_run < 0:
-            # Violation occurs when h(t) > h(t-2)
-            if high_prices.iloc[i] > high_prices.iloc[i-2]:
-                # G(t) = h(t) - h(t-2)
-                gap = high_prices.iloc[i] - high_prices.iloc[i-2]
-            else:
-                # No violation: G(t) is the previous breaking gap G(t-1)
-                gap = breaking_gap[i-1]
-        
-        # --- Undefined/Zero Trend Case ---
-        # If R_s(t) = 0 (e.g., at the start of the series or if c(t) = c(t_s-1)),
-        # we assume no current directional trend, so the gap carries over.
-        else: 
-             gap = breaking_gap[i-1]
+def add_slow_swing_ratio(historical_data: pd.DataFrame) -> pd.DataFrame:
+    """
+    Calculates Slow Swing Ratio (Ss).
+    Ss(t) = min(2, (|Rs(t)| / |R*_s(t)|)^2)
+    """
+    df = historical_data
+    rs_abs = df['Rs'].abs()
+    rs_star_abs = df['R*'].abs()
 
+    # Vectorized calculation
+    ratio_squared = np.divide(
+        rs_abs, 
+        rs_star_abs, 
+        out=np.zeros_like(rs_abs), 
+        where=rs_star_abs!=0
+    ) ** 2
+    
+    df['Ss'] = np.minimum(2, ratio_squared)
+    return df
 
-        breaking_gap[i] = gap
+def add_directional_probabilities(historical_data):
+    """
+    Adds directional probabilities (P_up and P_down) to the DataFrame.
+    """
+    df = historical_data
+    p_up = pd.Series(np.nan, index=df.index)
+    p_down = pd.Series(np.nan, index=df.index)
+    
+    sf = df['Sf']
+    ss = df['Ss']
+    rf = df['Rf']
+    rs = df['Rs']
 
-    historical_data['breaking_gap'] = quantize(breaking_gap    )
+    # Conditions
+    conflicting_fast_up_slow_down = (rf > 0) & (rs < 0)
+    conflicting_fast_down_slow_up = (rf < 0) & (rs > 0)
+    aligned_up = (rf > 0) & (rs > 0)
+    aligned_down = (rf < 0) & (rs < 0)
+    
+    # --- Conflicting Trends ---
+    # Formula: P_reversal = Sf / (Sf + Ss) if Sf > 0 else 0.5
+    
+    sum_swings = sf + ss
+    conflicting_prob = pd.Series(0.5, index=df.index)
+    
+    # Calculate ratio where Sf > 0. Avoid division by zero if sum_swings is 0.
+    valid_mask = (sf > 0) & (sum_swings > 0)
+    conflicting_prob.loc[valid_mask] = sf.loc[valid_mask] / sum_swings.loc[valid_mask]
+    
+    # Fast Ascending vs Slow Descending -> P_down is the reversal probability
+    p_down.loc[conflicting_fast_up_slow_down] = conflicting_prob.loc[conflicting_fast_up_slow_down]
+    
+    # Fast Descending vs Slow Ascending -> P_up is the reversal probability
+    p_up.loc[conflicting_fast_down_slow_up] = conflicting_prob.loc[conflicting_fast_down_slow_up]
+
+    # --- Aligned Trends ---
+    # Formula: P_continuation = min(1, Ss/4 + Sf)
+    
+    aligned_prob = np.minimum(1, (ss / 4) + sf)
+    
+    # Both Ascending -> P_up is continuation
+    p_up.loc[aligned_up] = aligned_prob.loc[aligned_up]
+    
+    # Both Descending -> P_down is continuation
+    p_down.loc[aligned_down] = aligned_prob.loc[aligned_down]
+    
+    # --- Complementary Probabilities ---
+    df['P↑'] = p_up.fillna(1 - p_down)
+    df['P↓'] = p_down.fillna(1 - p_up)
+    
     historical_data.dropna(inplace=True)
+    return df
+
+import numpy as np
+import pandas as pd
+
+def add_price_volume_strength_oscillator(historical_data: pd.DataFrame, price: str) -> pd.DataFrame:
+    """
+    Calculates and adds the Price-Volume Strength Oscillator (Y) to the DataFrame.
+    The new column is named 'Y_{price}'.
+    
+    Formula: Y(t) = [2(p(t) - p(t-1)) / (p(t) + p(t-1))] * [v(t) / v(t-1)]
+    """
+    df = historical_data
+    
+    # Ensure necessary columns exist
+    if price not in df.columns or 'Volume' not in df.columns:
+        raise ValueError(f"Columns '{price}' and 'Volume' must exist in the DataFrame.")
+
+    # 1. Get current and previous price and volume series
+    p_t = df[price]
+    p_prev = p_t.shift(1)
+    
+    v_t = df['Volume']
+    v_prev = v_t.shift(1)
+
+    # 2. Calculate Price Term: 2 * (p(t) - p(t-1)) / (p(t) + p(t-1))
+    # We use np.divide to handle cases where (p(t) + p(t-1)) might be 0 (unlikely but possible)
+    price_sum = p_t + p_prev
+    price_diff = p_t - p_prev
+    
+    price_term = np.divide(
+        2 * price_diff,
+        price_sum,
+        out=np.zeros_like(p_t, dtype=float),
+        where=price_sum != 0
+    )
+
+    # 3. Calculate Volume Term: v(t) / v(t-1)
+    # Handle division by zero if v(t-1) is 0
+    volume_term = np.divide(
+        v_t,
+        v_prev,
+        out=np.zeros_like(v_t, dtype=float),
+        where=v_prev != 0
+    )
+
+    # 4. Compute Oscillator Y(t)
+    y_values = price_term * volume_term
+    
+    # 5. Assign to new column
+    col_name = f"Y_{price}"
+    df[col_name] = y_values
+    
+    # Remove the first row which will be NaN due to shifting
+    # (Optional: depends on if you want to preserve the original shape)
+    df.dropna(subset=[col_name], inplace=True)
+    
+    return df
+
+def add_relative_volume(ticker, historical_data):
+    market_cap = ticker.info.get('marketCap')
+    historical_data['RV'] = historical_data['Volume'] / (market_cap / historical_data['Close'])    
+    historical_data.dropna(inplace=True)        
