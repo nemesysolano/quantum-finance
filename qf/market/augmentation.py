@@ -336,3 +336,192 @@ def add_relative_volume(ticker, historical_data):
     market_cap = ticker.info.get('marketCap')
     historical_data['RV'] = historical_data['Volume'] / (market_cap / historical_data['Close'])    
     historical_data.dropna(inplace=True)        
+
+def add_closest_higher_high(historical_data):
+    highs = historical_data['High']
+    num_rows = len(historical_data)
+    result_val = np.full(num_rows, np.nan)
+    result_days = np.full(num_rows, np.nan)
+
+    for t in range(1, num_rows):
+        current_high = highs.iloc[t]
+        for i in range(1, t + 1):
+            past_high = highs.iloc[t - i]
+            if past_high > current_high:
+                result_val[t] = past_high
+                result_days[t] = i
+                break
+    historical_data['h_↑'] = result_val
+    historical_data['Dh_↑'] = result_days
+    historical_data.dropna(inplace=True)
+
+def add_closest_lower_high(historical_data):
+    highs = historical_data['High']
+    num_rows = len(historical_data)
+    result_val = np.full(num_rows, np.nan)
+    result_days = np.full(num_rows, np.nan)
+
+    for t in range(1, num_rows):
+        current_high = highs.iloc[t]
+        for i in range(1, t + 1):
+            past_high = highs.iloc[t - i]
+            if past_high < current_high:
+                result_val[t] = past_high
+                result_days[t] = i
+                break
+    historical_data['h_↓'] = result_val
+    historical_data['Dh_↓'] = result_days
+    historical_data.dropna(inplace=True)
+
+def add_closest_higher_low(historical_data):
+    lows = historical_data['Low']
+    num_rows = len(historical_data)
+    result_val = np.full(num_rows, np.nan)
+    result_days = np.full(num_rows, np.nan)
+
+    for t in range(1, num_rows):
+        current_low = lows.iloc[t]
+        for i in range(1, t + 1):
+            past_low = lows.iloc[t - i]
+            if past_low > current_low:
+                result_val[t] = past_low
+                result_days[t] = i
+                break
+    historical_data['l_↑'] = result_val
+    historical_data['Dl_↑'] = result_days
+    historical_data.dropna(inplace=True)
+
+def add_closest_lower_low(historical_data):
+    lows = historical_data['Low']
+    num_rows = len(historical_data)
+    result_val = np.full(num_rows, np.nan)
+    result_days = np.full(num_rows, np.nan)
+    for t in range(1, num_rows):
+        current_low = lows.iloc[t]
+        for i in range(1, t + 1):
+            past_low = lows.iloc[t - i]
+            if past_low < current_low:
+                result_val[t] = past_low
+                result_days[t] = i
+                break
+    historical_data['l_↓'] = result_val
+    historical_data['Dl_↓'] = result_days
+    historical_data.dropna(inplace=True)
+
+def identify_pivots(df, window=5):
+    df['is_pivot_high'] = df['High'].rolling(window=window*2+1, center=True).max() == df['High']
+    df['is_pivot_low'] = df['Low'].rolling(window=window*2+1, center=True).min() == df['Low']
+    return df
+
+def get_nearest_structural_extreme(current_idx, current_val, df, pivot_col, price_col, comparison):    
+    for past_idx in range(current_idx - 1, -1, -1):
+        if df.iat[past_idx, df.columns.get_loc(pivot_col)]: # Check if it is a pivot
+            past_val = df.iat[past_idx, df.columns.get_loc(price_col)]
+            if comparison(past_val, current_val):
+                return past_idx
+    return -1
+
+def add_cosine_and_sine_for_price_time_angles(df):
+    """
+    Calculates Price-Time angles based on Fractal Pivots and ATR Normalization.
+    
+    Implements:
+    A. Fractal Pivot Search (Structural points instead of noise).
+    B. ATR Normalization (Gann Box stabilization).
+    C. Edge Case Handling (Breakout constants).
+    """
+    
+    # 1. Ensure Dependencies
+    # We need ATR for normalization. Assuming 'ATR' or 'Atrp14' exists. 
+    # If using 'Atrp14' (percentage), we convert back to absolute ATR approx or calculate it.
+    # Here we will calculate a standard 14-period ATR for safety.
+    high_low = df['High'] - df['Low']
+    high_close = np.abs(df['High'] - df['Close'].shift())
+    low_close = np.abs(df['Low'] - df['Close'].shift())
+    ranges = pd.concat([high_low, high_close, low_close], axis=1)
+    true_range = np.max(ranges, axis=1)
+    df['ATR_14'] = true_range.rolling(14).mean()
+
+    # 2. Identify Structural Pivots (Suggestion A)
+    # Using a 5-day window (2 days before, 2 days after)
+    df = identify_pivots(df, window=2)
+
+    # Initialize columns for angles (theta)
+    # 1: Higher High, 2: Lower High, 3: Higher Low, 4: Lower Low
+    thetas = {1: [], 2: [], 3: [], 4: []}
+    
+    # Comparisons for the 4 extremes
+    # Higher High: Past High > Current High
+    # Lower High: Past High < Current High
+    # Higher Low: Past Low > Current Low
+    # Lower Low: Past Low < Current Low
+    comparisons = {
+        1: ('is_pivot_high', 'High', lambda p, c: p > c),
+        2: ('is_pivot_high', 'High', lambda p, c: p < c),
+        3: ('is_pivot_low', 'Low', lambda p, c: p > c),
+        4: ('is_pivot_low', 'Low', lambda p, c: p < c)
+    }
+
+    # Iterate through the DataFrame
+    # Note: Iterating rows is slow in Pandas, but necessary for complex lookback logic 
+    # that varies per row.
+    
+    for i in range(len(df)):
+        if i < 20: # Skip beginning where ATR/Pivots might be unstable
+            for k in thetas: thetas[k].append(0)
+            continue
+            
+        atr = df.iat[i, df.columns.get_loc('ATR_14')]
+        if pd.isna(atr) or atr == 0:
+            atr = df.iat[i, df.columns.get_loc('Close')] * 0.01 # Fallback
+            
+        current_time_idx = i
+        
+        for k, (pivot_col, price_col, comp_func) in comparisons.items():
+            current_price = df.iat[i, df.columns.get_loc(price_col)]
+            
+            # Find closest structural extreme
+            past_idx = get_nearest_structural_extreme(
+                current_time_idx, current_price, df, pivot_col, price_col, comp_func
+            )
+            
+            if past_idx != -1:
+                # Suggestion B: Stabilized Normalization
+                # Slope = (Delta Price) / (Delta Time * ATR)
+                # This normalizes the "speed" of the move relative to volatility.
+                
+                past_price = df.iat[past_idx, df.columns.get_loc(price_col)]
+                delta_price = current_price - past_price
+                delta_time = current_time_idx - past_idx # Number of bars
+                
+                # Gann Theory: 45 degrees (slope 1) is a "balanced" market.
+                # If price moves 1 ATR in 1 day, slope is 1.
+                normalized_slope = delta_price / (delta_time * atr)
+                
+                # Calculate Angle in Radians
+                angle = np.arctan(normalized_slope)
+                thetas[k].append(angle)
+            else:
+                # Suggestion C: Edge Case Handling (Breakout)
+                # If we are making a New High (no Higher High found), 
+                # we are in "blue sky" mode. 
+                # Resistance is effectively infinite or vertical (90 deg / pi/2).
+                if k == 1: # Higher High (Resistance) missing -> Bullish Breakout
+                    thetas[k].append(np.pi / 2)
+                elif k == 4: # Lower Low (Support) missing -> Bearish Breakdown
+                    thetas[k].append(-np.pi / 2)
+                else:
+                    thetas[k].append(0)
+
+
+    # 3. Add Cosine and Sine features
+    for j in range(len(thetas)):
+        k = j + 1
+        df[f'cos_θ{k}'] = np.cos(thetas[k])
+        df[f'sin_θ{k}'] = np.sin(thetas[k])
+
+
+    # Clean up temporary columns
+    df.drop(columns=['is_pivot_high', 'is_pivot_low', 'ATR_14'], inplace=True, errors='ignore')
+    df.dropna(inplace=True)
+    return df

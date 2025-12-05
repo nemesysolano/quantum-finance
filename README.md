@@ -143,6 +143,52 @@ $Y(t) =  2 \frac {p(t)-p(t-1)}{p(t)+p(t-1)} \frac {v(t)}{v(t-1)}$, where
 This oscillator detects strong bullish (${Y(t) \rarr +\infty}$) or bearish (${Y(t) \rarr -\infty}$) behavior. Moreover, ${p(t)}$ represents ${h(t)}$ (high price in OHLC bar) when
 analysing resistance/bearish momentum, ${l(t)}$ (low price in OHLC bar) when analysing support/bullish momentum or ${c(t)}$ close price when analysing trends.
 
+## The Price-Time Angles ##
+
+### The Closest Extreme ###
+
+These concepts refer to finding the nearest prior occurrence of a high or low price that is **structurally higher** or **lower** than the current price at ${t}$. The search is always backward in time.
+
+#### Closest Higher High (${h_↑(t)}$) ####
+
+* **Definition:** The higher high closest to the current high price $h(t)$ in the **OHLC** bar at time ${t}$.
+* **Formula:** Finds the $h(t-i)$ that is strictly greater than $h(t)$ while minimizing the lookback period ${i}$.
+
+${h_↑(t) = h(t-i_{\max(h)})}$ where ${i_{{\max(h)}} = \min \{j <\in \mathbb{Z}^+> \mid h(t-j) > h(t)\}}$
+
+#### Closest Lower High (${h_↓(t)}$) #### 
+
+* **Definition:** The lower high closest to the current high price $h(t)$ in the **OHLC** bar at time ${t}$.
+* **Formula:** Finds the $h(t-i)$ that is strictly less than $h(t)$ while minimizing the lookback period ${i}$.
+
+${h_↓(t) = h(t-i_{\min(h)})}$ where ${i_{\min(h)} = \min \{j \in \mathbb{Z}^+ \mid h(t-j) < h(t)\}}$
+
+#### Closest Higher Low (${l_↑(t)}$) #### 
+
+* **Definition:** The higher low closest to the current low price $l(t)$ in the **OHLC** bar at time ${t}$.
+* **Formula:** Finds the $l(t-i)$ that is strictly greater than $l(t)$ while minimizing the lookback period ${i}$.
+
+${l_↑(t) = l(t-i_{\max(l)})}$ where ${i_{\max(l)} = \min \{j \in \mathbb{Z}^+ \mid l(t-j) > l(t)\}}$
+
+#### Closest Lower Low (${l_↓(t)}$) #### 
+
+* **Definition:** The lower low closest to the current low price $l(t)$ in the **OHLC** bar at time $t$.
+* **Note:** The document uses the notation ${h_↓(t)}$ for this indicator. For consistency with the other low-price indicators, the more logical notation $l_↓(t)$ is used here, but the value is based on the comparison of low prices.
+* **Formula:** Finds the $l(t-i)$ that is strictly less than $l(t)$ while minimizing the lookback period ${i}$.
+
+${l_↓(t) = l(t-i_{\min(l)})}$ where ${i_{\min(l)} = \min \{j \in \mathbb{Z}^+ \mid l(t-j) < l(t)\}}$
+
+---
+
+Consider these definitions
+
+1. ${B(t) = \max(t-i_{\max(h)},\space t-i_{\min(h)},\space t-i_{\max(l)},\space t-i_{\max(l)})}$ , 
+2. ${b(t) = \{\frac{t-i_{\max(h)}}{B(t)}, \space \frac{t-i_{\min(h)}}{B(t)}, \space \frac{t-i_{\max(l)}}{B(t)}, \space \frac{t-i_{\max(l)}}{B(t)}\}}$, 
+3. ${C(t) = \max(h(t)-h_↑(t),\space h(t)-h_↓(t),\space l_↑(t)-l(t),\space l_↓(t)-l(t))}$ and
+4. ${c(t) = \{\frac{h(t)-h_↑(t)}{C(t)}, \space \frac{h(t)-h_↓(t)}{C(t)}, \space \frac{l_↑(t)-l(t)}{C(t)}, \space \frac{l_↓(t)-l(t)}{C(t)}\}}$.
+
+If we divide pairwise $b_k(t)$ by $c_k(t)$ and then apply ${\mathbf{arctan}}$ function to every element in the resulting list, we get four **price-time angles** ${θ_1(t)}$, ${θ_2(t)}$, ${θ_3(t)}$ and ${θ_4(t)}$ ruling t time ${t}$.
+
 ## Baseline Forecast Models ##
 
 In order to assess how much improvement quantum mechanics can add to existing neural network models, we are going to draft two baselines models; these  will be
@@ -183,3 +229,18 @@ The model uses a fixed **lookback window of $k$ bars** (from $t-1$ to $t-k$) and
 | $Y_d(t)$ | $Y_d(t-1)$ | $Y_d(t-2)$ | ... | $Y_d(t-k)$ |
 
 where $Y_d(τ) = Y(τ) - Y(τ-1)$
+
+### Price-Time Angle to Probability Difference Function ###
+
+Consider the four price-time angles ${θ_1(t)}$, ${θ_2(t)}$, ${θ_3(t)}$ and ${θ_4(t)}$ ruling at time ${t}$. We will now draft prediction target and input features for a 
+DNN model aiming at binding price-time angles to probability difference $P_d(t)$.
+
+#### Prediction Target ####
+
+**Probability** difference at time $t$ (namely $P_d(t)$).
+
+#### Input Features ####
+
+A sequence containing $\cos$ and $\sin$ for each price-time angle.
+
+$[\cos(θ_1(t)), \sin(θ_1(t)), \cos(θ_2(t)), \sin(θ_2(t)), \cos(θ_3(t)), \sin(θ_3(t)), \cos(θ_4(t)), \sin(θ_4(t))]$

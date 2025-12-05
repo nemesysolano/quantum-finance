@@ -8,21 +8,27 @@ import sys
 import qf.nn as nn
 import qf.nn.probdiff as probdiff
 import qf.nn.pricevoldiff as pricevoldiff
+import qf.nn.priceangle as priceangle
 import tensorflow as tf
 import os
 import argparse
 
 model_factories = {
     'prob': probdiff,
-    'pricevol': pricevoldiff
+    'pricevol': pricevoldiff,
+    'priceangle': priceangle
 }
+
 if __name__ == '__main__': # 
     parser = argparse.ArgumentParser()
     parser.add_argument('ticker', type=str, help='Ticker symbol in NYSE')    
-    parser.add_argument('model', type=str, choices=['prob', 'pricevol'], help='The model to use for training')
+    parser.add_argument('model', type=str, choices=[key for key in model_factories.keys()], help='The model to use for training')
     parser.add_argument('--epochs', type=int, default=100, help='Number of training epochs.')
     parser.add_argument('--patience', type=int, default=50, help='Number of epochs with no improvement after which training will be stopped.')
     parser.add_argument('--lookback', type=int, default=14, help='Number of epochs with no improvement after which training will be stopped.')
+
+    parser.add_argument('--l2_rate', type=float, default=1e-6, help='Number of epochs with no improvement after which training will be stopped.')
+    parser.add_argument('--dropout_rate', type=float, default=0.20, help='Number of epochs with no improvement after which training will be stopped.')
 
     args = parser.parse_args()
 
@@ -34,8 +40,8 @@ if __name__ == '__main__': #
     lookback = args.lookback
 
     k = 8 if lookback < 8 or lookback > 30 else lookback
-    l2_rate = 1e-6
-    dropout_rate = 0.20
+    l2_rate = args.l2_rate
+    dropout_rate = args.dropout_rate
 
     historical_data = mkt.import_market_data(ticker)
     X_train, X_val, X_test = mkt.create_train_val_test(model_factory.create_inputs(historical_data, k))
