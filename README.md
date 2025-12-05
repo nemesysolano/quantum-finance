@@ -129,14 +129,28 @@ $P_↓(t) = \mathbf{min}(1,\frac {|S_s(t)|} {4} + |S_f(t)|)$
 
 $P_↑(t) = 1- P_↓(t)$
 
+## Price-Volume Oscillator ##
+
+We define ${Y(t)}$ as the **price-volume** oscillator:
+
+$Y(t) =  2 \frac {p(t)-p(t-1)}{p(t)+p(t-1)} \frac {v(t)}{v(t-1)}$, where
+
+- ${p(t)}$ price at time ${t}$
+- ${p(t-1)}$ price at time ${t-1}$
+- ${v(t)}$ traded volume at time ${t}$
+- ${v(t-1)}$ traded volume at time ${t-1}$
+
+This oscillator detects strong bullish (${Y(t) \rarr +\infty}$) or bearish (${Y(t) \rarr -\infty}$) behavior. Moreover, ${p(t)}$ represents ${h(t)}$ (high price in OHLC bar) when
+analysing resistance/bearish momentum, ${l(t)}$ (low price in OHLC bar) when analysing support/bullish momentum or ${c(t)}$ close price when analysing trends.
+
 ## Baseline Forecast Models ##
 
 In order to assess how much improvement quantum mechanics can add to existing neural network models, we are going to draft two baselines models; these  will be
 subsequently improved using quantum mechanics.
 
-### Probability Difference Direction Forecast ###
+### Probability Difference Forecast ###
 
-This forcasts **probability difference** at time $t$, denoted as $P_d(t)$, from last $k$ probability differences.
+This model forcasts **probability difference** at time $t$, denoted as $P_d(t)$, from last $k$ probability differences.
 
 #### Prediction Target ####
 
@@ -144,10 +158,28 @@ The probability difference defined above which a signed value ranging in [-1,1].
 
 #### Input Features ####
 
-The model uses a fixed **lookback window of $k$ bars** (from $t-1$ to $t-k$) and the features are **probability differences** ($P_d$) defined below:
+The model uses a fixed **lookback window of $k$ bars** (from $t-1$ to $t-k$) and the features are **probability differences** ($P_d(t)$) defined below:
 
 | Feature | $t-1$ | $t-2$ | ... | $t-k$ |
 | :--- | :--- | :--- | :--- | :--- |
-| $P_d$ | $P_d(t-1)$ | $P_d(t-2)$ | ... | $P_d(t-k)$ |
+| $P_d(t)$ | $P_d(t-1)$ | $P_d(t-2)$ | ... | $P_d(t-k)$ |
 
 where $P_d(t-k) = P_↑(t-k) - P_↓(t-k)$
+
+### Price-Volume Difference Forecast ###
+
+This model forcasts ****price-volume difference**** at time $t$, denoted as $Y_d(t)$, from last $k$ consecutive $Y(t) - Y(t-1)$ differences.
+
+#### Prediction Target ####
+
+The **price-volume difference** difference mentioned above and defined below which a signed value.
+
+#### Input Features ####
+
+The model uses a fixed **lookback window of $k$ bars** (from $t-1$ to $t-k$) and the features are ****price-volume difference** ($Y_d(t)$) defined below:
+
+| Feature | $t-1$ | $t-2$ | ... | $t-k$ |
+| :--- | :--- | :--- | :--- | :--- |
+| $Y_d(t)$ | $Y_d(t-1)$ | $Y_d(t-2)$ | ... | $Y_d(t-k)$ |
+
+where $Y_d(τ) = Y(τ) - Y(τ-1)$

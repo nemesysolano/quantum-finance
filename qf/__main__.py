@@ -5,24 +5,44 @@ import mplfinance as mpf
 from qf.quantum.estimators import quantum_energy_levels, quantum_lambda
 from qf.stats.distributions import empirical_distribution
 import sys
-from scipy.interpolate import make_smoothing_spline
 import qf.nn as nn
-import qf.nn.propdiff as probdiff
+import qf.nn.probdiff as probdiff
+import qf.nn.pricevoldiff as pricevoldiff
 import tensorflow as tf
 import os
+import argparse
 
+model_factories = {
+    'prob': probdiff,
+    'pricevol': pricevoldiff
+}
 if __name__ == '__main__': # 
-    ticker = sys.argv[1]
-    k = 14
+    parser = argparse.ArgumentParser()
+    parser.add_argument('ticker', type=str, help='Ticker symbol in NYSE')    
+    parser.add_argument('model', type=str, choices=['prob', 'pricevol'], help='The model to use for training')
+    parser.add_argument('--epochs', type=int, default=100, help='Number of training epochs.')
+    parser.add_argument('--patience', type=int, default=50, help='Number of epochs with no improvement after which training will be stopped.')
+    parser.add_argument('--lookback', type=int, default=14, help='Number of epochs with no improvement after which training will be stopped.')
+
+    args = parser.parse_args()
+
+    ticker = args.ticker.upper()
+    patience = args.patience
+    model_factory_name = args.model
+    epochs = args.epochs
+    model_factory = model_factories[model_factory_name]
+    lookback = args.lookback
+
+    k = 8 if lookback < 8 or lookback > 30 else lookback
     l2_rate = 1e-6
     dropout_rate = 0.20
 
     historical_data = mkt.import_market_data(ticker)
-    X_train, X_val, X_test = mkt.create_train_val_test(probdiff.create_inputs(historical_data, k))
+    X_train, X_val, X_test = mkt.create_train_val_test(model_factory.create_inputs(historical_data, k))
     X_train_scaled, X_val_scaled, X_test_scaled, _ = nn.scale_features(X_train, X_val, X_test)
-    Y_train, Y_val, Y_test= mkt.create_train_val_test(probdiff.create_targets(historical_data, k))    
+    Y_train, Y_val, Y_test= mkt.create_train_val_test(model_factory.create_targets(historical_data, k))    
 
-    baseline_model = nn.propdiff.create_model(k, l2_rate, dropout_rate)
+    baseline_model = model_factory.create_model(k, l2_rate, dropout_rate)
     checkpoint_filepath = os.path.join(os.getcwd(), 'models', f'{ticker}.keras')
 
     # UPDATED CALLBACK: Monitoring validation accuracy and setting mode='max'
@@ -36,7 +56,7 @@ if __name__ == '__main__': #
     # UPDATED CALLBACK: Monitoring validation accuracy and setting mode='max'
     early_stopping_callback = tf.keras.callbacks.EarlyStopping(
         monitor='val_mse', # Monitor the classification metric
-        patience=10, # Early stopping patience
+        patience=patience, # Early stopping patience
         mode='min', # We want to MAXIMIZE the accuracy
         restore_best_weights=True
     )
@@ -45,7 +65,7 @@ if __name__ == '__main__': #
     baseline_model.fit(
         X_train_scaled, 
         Y_train,
-        epochs=25,
+        epochs=epochs,
         batch_size=32, 
         validation_data=(X_val_scaled, Y_val),
         callbacks = [model_checkpoint_callback, early_stopping_callback]
@@ -73,7 +93,7 @@ if __name__ == '__main__': #
     matching_pct = np.count_nonzero(matching) / len(Y_pred)
     different_pct = np.count_nonzero(different) / len(Y_pred)
 
-    output_file = os.path.join(os.getcwd(), "test-results", f"report.md")
+    output_file = os.path.join(os.getcwd(), "test-results", f"report-{model_factory_name}.md")
     mode = 'a' if os.path.exists(output_file) else 'w'
     with open(output_file, mode) as f:
         if mode == 'w':
