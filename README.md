@@ -243,4 +243,4 @@ DNN model aiming at binding price-time angles to probability difference $P_d(t)$
 
 A sequence containing $\cos$ and $\sin$ for each price-time angle.
 
-$[\cos(θ_1(t)), \sin(θ_1(t)), \cos(θ_2(t)), \sin(θ_2(t)), \cos(θ_3(t)), \sin(θ_3(t)), \cos(θ_4(t)), \sin(θ_4(t))]$
+$[\cos θ_1(t), \sin θ_1(t), \cos θ_2(t), \sin θ_2(t), \cos θ_3(t), \sin θ_3(t), \cos θ_4(t), \sin θ_4(t)]$
