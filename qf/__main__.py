@@ -26,7 +26,6 @@ if __name__ == '__main__': #
     parser.add_argument('--epochs', type=int, default=100, help='Number of training epochs.')
     parser.add_argument('--patience', type=int, default=50, help='Number of epochs with no improvement after which training will be stopped.')
     parser.add_argument('--lookback', type=int, default=14, help='Number of epochs with no improvement after which training will be stopped.')
-
     parser.add_argument('--l2_rate', type=float, default=1e-6, help='Number of epochs with no improvement after which training will be stopped.')
     parser.add_argument('--dropout_rate', type=float, default=0.20, help='Number of epochs with no improvement after which training will be stopped.')
 
