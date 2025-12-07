@@ -28,6 +28,7 @@ if __name__ == '__main__': #
     parser.add_argument('--lookback', type=int, default=14, help='Number of epochs with no improvement after which training will be stopped.')
     parser.add_argument('--l2_rate', type=float, default=1e-6, help='Number of epochs with no improvement after which training will be stopped.')
     parser.add_argument('--dropout_rate', type=float, default=0.20, help='Number of epochs with no improvement after which training will be stopped.')
+    parser.add_argument('--scale_features', type=str, default='yes', choices=['yes', 'no'])
 
     args = parser.parse_args()
 
@@ -37,6 +38,7 @@ if __name__ == '__main__': #
     epochs = args.epochs
     model_factory = model_factories[model_factory_name]
     lookback = args.lookback
+    scale_features = args.scale_features == 'yes'
 
     k = 8 if lookback < 8 or lookback > 30 else lookback
     l2_rate = args.l2_rate
@@ -48,7 +50,7 @@ if __name__ == '__main__': #
     Y_train, Y_val, Y_test= mkt.create_train_val_test(model_factory.create_targets(historical_data, k))    
 
     baseline_model = model_factory.create_model(k, l2_rate, dropout_rate)
-    checkpoint_filepath = os.path.join(os.getcwd(), 'models', f'{ticker}.keras')
+    checkpoint_filepath = os.path.join(os.getcwd(), 'models', f'{ticker}-{model_factory_name}.keras')
 
     # UPDATED CALLBACK: Monitoring validation accuracy and setting mode='max'
     model_checkpoint_callback = tf.keras.callbacks.ModelCheckpoint(
@@ -91,8 +93,8 @@ if __name__ == '__main__': #
     Y_expected = np.int32(np.sign(Y_test.flatten()))
 
     # Filters to findout Y_pred's signums and Y_expected's match.
-    different = Y_pred != Y_expected
     matching  = Y_pred == Y_expected
+    different = Y_pred != Y_expected
 
     # Calculate matching rate and non-matching rates (they are complementary);
     matching_pct = np.count_nonzero(matching) / len(Y_pred)
@@ -107,6 +109,7 @@ if __name__ == '__main__': #
             print(f"1. k={k}", file=f)
             print(f"2. l2_rate={l2_rate}", file=f)
             print(f"3. dropout_rate={dropout_rate}", file=f)
+            print(f"4. scale features={args.dropout_rate}", file=f)
             print("## Results Table ##", file=f)
             print("|Ticker|MSE|MAE|Match %|Diff %|", file=f) # Updated table headers
             print("|---|---|---|---|---|", file=f)

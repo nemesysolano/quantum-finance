@@ -237,7 +237,7 @@ DNN model aiming at binding price-time angles to probability difference $P_d(t)$
 
 #### Prediction Target ####
 
-**Probability** difference at time $t$ (namely $P_d(t)$).
+**probability difference** at time $t$ (namely $P_d(t)$). 
 
 #### Input Features ####
 
