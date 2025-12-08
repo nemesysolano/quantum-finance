@@ -8,7 +8,7 @@ from typing import Callable, Union
 from qf.market.augmentation import add_breaking_gap, add_cosine_and_sine_for_price_time_angles, add_directional_probabilities, add_fast_swing_ratio, add_fast_trend_run, add_last_opposite, add_price_volume_strength_oscillator, add_relative_volume, add_slow_swing_ratio, add_slow_trend_run, add_structural_direction
 
 def read_csv(path):
-    historical_data = pd.read_csv(path, parse_dates=True, date_format='%Y-%m-%d %H:%M:%S', index_col='Date')
+    historical_data = pd.read_csv(path, parse_dates=True, date_format='%Y-%m-%d', index_col='Date')
     return historical_data
 
 def remove_timezone_from_json_dates(file_path):
