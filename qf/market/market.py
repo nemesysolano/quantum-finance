@@ -36,7 +36,7 @@ def import_market_data(symbol):
 
     if not os.path.exists(output_path):
         ticker = yf.Ticker(symbol)        
-        historical_data = ticker.history(period="5y", interval="1d")  
+        historical_data = ticker.history(period="10y", interval="1d")  
         add_low_high_average(historical_data)
         historical_data.to_csv(output_path)        
 
@@ -71,30 +71,16 @@ def import_market_all_data():
     for symbol in symbols:
         import_market_data(symbol)
 
-def read_train_val_test(symbol):
+def read_base_train_val_test(symbol):
     module_dir = os.path.dirname(__file__)
     data_dir = os.path.join(module_dir, 'data')
     output_path = os.path.join(data_dir, f"{symbol}.csv")
-    historical_data = read_csv(output_path)
+    return create_base_train_val_test(read_csv(output_path))
     
-    n = len(historical_data)
-    train = historical_data[0:int(n*0.7)]
-    val = historical_data[int(n*0.7):int(n*0.9)]
-    test = historical_data[int(n*0.9):]
-    return train, val, test
 
-def read_train_val(symbol):
-    module_dir = os.path.dirname(__file__)
-    data_dir = os.path.join(module_dir, 'data')
-    output_path = os.path.join(data_dir, f"{symbol}.csv")
-    historical_data = read_csv(output_path)
-    n = len(historical_data)
-    train_end = int(n * 0.75)
-    train = historical_data[:train_end]
-    val = historical_data[train_end:]
-    return train, val
-
-def create_train_val_test(historical_data):
+def create_base_train_val_test(dataset):
+    base_length = int(len(dataset)*0.8)
+    historical_data = dataset[0: base_length]
     n = len(historical_data)
     train = historical_data[0:int(n*0.7)]
     val = historical_data[int(n*0.7):int(n*0.9)]

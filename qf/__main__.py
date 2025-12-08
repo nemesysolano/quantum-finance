@@ -20,6 +20,7 @@ model_factories = {
 }
 
 if __name__ == '__main__': # 
+
     parser = argparse.ArgumentParser()
     parser.add_argument('ticker', type=str, help='Ticker symbol in NYSE')    
     parser.add_argument('model', type=str, choices=[key for key in model_factories.keys()], help='The model to use for training')
@@ -45,9 +46,9 @@ if __name__ == '__main__': #
     dropout_rate = args.dropout_rate
 
     historical_data = mkt.import_market_data(ticker)
-    X_train, X_val, X_test = mkt.create_train_val_test(model_factory.create_inputs(historical_data, k))
+    X_train, X_val, X_test = mkt.create_base_train_val_test(model_factory.create_inputs(historical_data, k))
     X_train_scaled, X_val_scaled, X_test_scaled, _ = nn.scale_features(X_train, X_val, X_test)
-    Y_train, Y_val, Y_test= mkt.create_train_val_test(model_factory.create_targets(historical_data, k))    
+    Y_train, Y_val, Y_test= mkt.create_base_train_val_test(model_factory.create_targets(historical_data, k))    
 
     baseline_model = model_factory.create_model(k, l2_rate, dropout_rate)
     checkpoint_filepath = os.path.join(os.getcwd(), 'models', f'{ticker}-{model_factory_name}.keras')
