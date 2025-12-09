@@ -109,7 +109,5 @@ def load_base_models(ticker):
     
 def meta_trainer(args):
     (base_train, base_val, base_test, meta_train, meta_trade) = mkt.read_datasets(args.ticker)
-    print(len(base_train), len(base_val), len(base_test), len(meta_train), len(meta_trade))
-    print(base_test is meta_train)
-    print(base_train.index[0], base_val.index[0], base_test.index[0], meta_train.index[0], meta_trade.index[0])
+    (prob, pricevol, priceangle) = load_base_models(args.ticker)
     

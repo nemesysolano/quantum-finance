@@ -6,13 +6,14 @@ from qf.quantum.estimators import quantum_energy_levels, quantum_lambda
 from qf.stats.distributions import empirical_distribution
 import qf.nn.models.base as base
 import qf.nn.models.meta as meta
+import qf.nn.trainers as trainers
 import tensorflow as tf
 import argparse
 
 
 model_trainers = {
-    'base': meta.base_trainer,
-    'meta': meta.meta_trainer
+    'base': trainers.base_trainer,
+    'meta': trainers.meta_trainer
 }
 
 base_model_factories = {
