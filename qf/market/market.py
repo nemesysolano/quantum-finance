@@ -6,6 +6,7 @@ import numpy as np
 from typing import Callable, Union
 
 from qf.market.augmentation import add_breaking_gap, add_cosine_and_sine_for_price_time_angles, add_directional_probabilities, add_fast_swing_ratio, add_fast_trend_run, add_last_opposite, add_price_volume_strength_oscillator, add_relative_volume, add_slow_swing_ratio, add_slow_trend_run, add_structural_direction
+base_meta_border = 0.80
 
 def read_csv(path):
     historical_data = pd.read_csv(path, parse_dates=True, date_format='%Y-%m-%d', index_col='Date')
@@ -71,18 +72,26 @@ def import_market_all_data():
     for symbol in symbols:
         import_market_data(symbol)
 
-def read_base_train_val_test(symbol):
+def read_datasets(symbol):
     module_dir = os.path.dirname(__file__)
     data_dir = os.path.join(module_dir, 'data')
     output_path = os.path.join(data_dir, f"{symbol}.csv")
-    return create_base_train_val_test(read_csv(output_path))
-    
+    return create_datasets(read_csv(output_path))
 
-def create_base_train_val_test(dataset):
-    base_length = int(len(dataset)*0.8)
-    historical_data = dataset[0: base_length]
-    n = len(historical_data)
-    train = historical_data[0:int(n*0.7)]
-    val = historical_data[int(n*0.7):int(n*0.9)]
-    test = historical_data[int(n*0.9):]
-    return train, val, test
+def create_datasets(dataset): 
+    n = len(dataset)
+    # Define split points for a 65/15/10/10 split
+    train_end = int(n * 0.65)
+    val_end = int(n * 0.80)   # 65% + 15%
+    test_end = int(n * 0.90)  # 80% + 10%
+
+    # Create contiguous, non-overlapping datasets
+    base_train = dataset[0:train_end]
+    base_val = dataset[train_end:val_end]
+    base_test = dataset[val_end:test_end]
+
+    # As per the logic, meta_train is an overlap with base_test
+    meta_train = base_test
+    meta_trade = dataset[test_end:]
+
+    return base_train, base_val, base_test, meta_train, meta_trade
