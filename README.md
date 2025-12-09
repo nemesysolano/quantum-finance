@@ -244,3 +244,10 @@ DNN model aiming at binding price-time angles to probability difference $P_d(t)$
 A sequence containing $\cos$ and $\sin$ for each price-time angle.
 
 $[\cos θ_1(t), \sin θ_1(t), \cos θ_2(t), \sin θ_2(t), \cos θ_3(t), \sin θ_3(t), \cos θ_4(t), \sin θ_4(t)]$
+
+# References #
+## People ###
+[Edmond (Sinclair) Lubangakene](https://www.linkedin.com/in/edmond-lubangakene-882350298/)
+
+## Articles ##
+[From Code to Cash](https://medium.com/@edmondlubangakene/from-code-to-cash-building-a-deep-neural-network-powered-breakout-strategy-in-python-mql5-5ab18f692cb5)
