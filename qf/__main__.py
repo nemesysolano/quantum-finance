@@ -5,15 +5,14 @@ import mplfinance as mpf
 from qf.quantum.estimators import quantum_energy_levels, quantum_lambda
 from qf.stats.distributions import empirical_distribution
 import qf.nn.models.base as base
-import qf.nn.models.meta as meta
-import qf.nn.trainers as trainers
+import qf.nn as nn
 import tensorflow as tf
 import argparse
 
 
 model_trainers = {
-    'base': trainers.base_trainer,
-    'meta': trainers.meta_trainer
+    'base': nn.base_trainer,
+    'meta': nn.meta_trainer
 }
 
 base_model_factories = {

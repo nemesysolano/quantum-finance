@@ -9,6 +9,10 @@ import qf.nn.models.base.pricevoldiff as pv_lib
 import qf.nn.models.base.probdiff as pd_lib
 import qf.nn.models.base.priceangle as ang_lib
 import sys
+import qf.nn as nn
+import argparse
+
+base_model_names = ('prob', 'pricevol', 'priceangle')
 
 def extract_meta_features(historical_data, models, k=14):
     """
@@ -41,9 +45,14 @@ def extract_meta_features(historical_data, models, k=14):
     # Stack into feature matrix for the Meta-Learner
     return np.column_stack([corrected_pv, corrected_pd, corrected_ang])
 
-def load_base_models(ticker):
-    base_model_names = ('pricevol', 'prob', 'priceangle')
-    base_model_path = lambda name: os.path.join(os.getcwd(), 'models', f'{ticker}-{name}.keras')
+def load_base_models(args):
+    ticker = args.ticker.upper()
+    base_model_path = lambda name: os.path.join(os.getcwd(), 'models', f'{ticker}-{name}.keras')        
+    for name in base_model_names:
+        if not os.path.exists(base_model_path(name)):
+            args.model = name
+            nn.base_trainer(args)
+
     return tuple([tf.keras.models.load_model(base_model_path(name)) for name in base_model_names])
 
 def train_and_test_ensemble(ticker, base_models, data, thresholds):
@@ -114,13 +123,27 @@ def best_threshold(results):
             best_thresh = threshold
     return best_history, best_thresh, max_pnl
 
+def arguments():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('ticker', type=str, help='Ticker symbol in NYSE')    
+    parser.add_argument('--epochs', type=int, default=100, help='Number of training epochs.')
+    parser.add_argument('--patience', type=int, default=50, help='Number of epochs with no improvement after which training will be stopped.')
+    parser.add_argument('--lookback', type=int, default=14, help='Lookback period required for certain indicators (like RSI).')
+    parser.add_argument('--l2_rate', type=float, default=1e-6, help='Number of epochs with no improvement after which training will be stopped.')
+    parser.add_argument('--dropout_rate', type=float, default=0.20, help='Number of epochs with no improvement after which training will be stopped.')
+    parser.add_argument('--scale_features', type=str, default='yes', choices=['yes', 'no'])
+
+    arguments = parser.parse_args()
+    return arguments
+
 if __name__ == "__main__":
-    ticker = sys.argv[1]
+    args = arguments()
+    ticker = args.ticker.upper()
     
     data_path = os.path.join(os.getcwd(),"qf", "market", "data", f"{ticker}.csv")
     data = mkt.read_csv(data_path)        
     
-    pv_model, pd_model, ang_model = load_base_models(ticker)
+    pv_model, pd_model, ang_model = load_base_models(args)
     base_models = (pv_model, pd_model, ang_model)
     
     # Thresholds represent PERCENTAGE moves now (0.005 = 0.5%, 0.01 = 1%)

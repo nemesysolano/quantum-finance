@@ -13,12 +13,6 @@ layers = tf.keras.layers
 regularizers = tf.keras.regularizers
 
 base_model_names = ('prob', 'pricevol', 'priceangle')
-base_model_factories = {
-    'prob': probdiff,
-    'pricevol': pricevoldiff,
-    'priceangle': priceangle
-}
-
 # -- base trainer module
 def base_trainer(args):
     ticker = args.ticker.upper()
@@ -27,7 +21,7 @@ def base_trainer(args):
     epochs = args.epochs
     lookback = args.lookback
     scale_features = args.scale_features == 'yes'
-    model_factory = base_model_factories[model_factory_name]
+    model_factory = nn.base_model_factories[model_factory_name]
      
     k = 8 if lookback < 8 or lookback > 30 else lookback
     l2_rate = args.l2_rate
@@ -93,8 +87,14 @@ def base_trainer(args):
         print(f"|{ticker}|{mse:.4f}|{mae:.4f}|{matching_pct:.4f}|{different_pct:.4f}|", file=f)
 
 #--- meta trainer module
-def load_base_models(ticker):
-    base_model_path = lambda name: os.path.join(os.getcwd(), 'models', f'{ticker}-{name}.keras')
+def load_base_models(args):
+    ticker = args.ticker.upper()
+    base_model_path = lambda name: os.path.join(os.getcwd(), 'models', f'{ticker}-{name}.keras')    
+    if not  os.path.exists(base_model_path):
+        for name in base_model_names:
+            args.model = name
+            base_trainer(args)
+
     return tuple([tf.keras.models.load_model(base_model_path(name)) for name in base_model_names])
 
 class CompoundModel:
@@ -145,7 +145,7 @@ def create_targets(historical_data, min_len):
     
 def meta_trainer(args):
     (_, _, _, meta_train, meta_trade) = mkt.read_datasets(args.ticker)
-    (prob_model, pricevol_model, priceangle_model) = load_base_models(args.ticker)
+    (prob_model, pricevol_model, priceangle_model) = load_base_models(args)
     compound_model = CompoundModel(prob_model, pricevol_model, priceangle_model)
     k = args.lookback    
     
