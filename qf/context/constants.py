@@ -1,1 +1,1 @@
-default_quantization_delta = 10e+2
+default_quantization_delta = 1e+2

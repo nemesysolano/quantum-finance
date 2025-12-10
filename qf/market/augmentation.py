@@ -334,8 +334,11 @@ def add_price_volume_strength_oscillator(historical_data: pd.DataFrame, price: s
 
 def add_relative_volume(ticker, historical_data):
     market_cap = ticker.info.get('marketCap')
-    historical_data['RV'] = historical_data['Volume'] / (market_cap / historical_data['Close'])    
-    historical_data.dropna(inplace=True)        
+    if not market_cap is None:
+        historical_data['RV'] = historical_data['Volume'] / (market_cap / historical_data['Close'])    
+    else:
+        historical_data['RV'] = np.zeros_like(historical_data['Volume'])
+        historical_data.dropna(inplace=True)        
 
 def add_closest_higher_high(historical_data):
     highs = historical_data['High']

@@ -48,7 +48,7 @@ def extract_meta_features(historical_data, models, k=14):
 def load_base_models(args):
     ticker = args.ticker.upper()
     base_model_path = lambda name: os.path.join(os.getcwd(), 'models', f'{ticker}-{name}.keras')        
-    for name in base_model_names:
+    for name in base_model_names:        
         if not os.path.exists(base_model_path(name)):
             args.model = name
             nn.base_trainer(args)
@@ -138,10 +138,8 @@ def arguments():
 
 if __name__ == "__main__":
     args = arguments()
-    ticker = args.ticker.upper()
-    
-    data_path = os.path.join(os.getcwd(),"qf", "market", "data", f"{ticker}.csv")
-    data = mkt.read_csv(data_path)        
+    ticker = args.ticker.upper()    
+    data = mkt.import_market_data(ticker)        
     
     pv_model, pd_model, ang_model = load_base_models(args)
     base_models = (pv_model, pd_model, ang_model)
