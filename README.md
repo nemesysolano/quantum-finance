@@ -245,6 +245,25 @@ A sequence containing $\cos$ and $\sin$ for each price-time angle.
 
 $[\cos θ_1(t), \sin θ_1(t), \cos θ_2(t), \sin θ_2(t), \cos θ_3(t), \sin θ_3(t), \cos θ_4(t), \sin θ_4(t)]$
 
+## The Meta Model ##
+
+Let $X_v(t)$, $X_p(t)$ and $X_a(t)$ be **price-volume**, **probability** and **price-time angle to probability** outputs from the three aforementioned base line models. The 
+meta model linearly combines this three outputs to produce a signed prediction.
+
+The linear combination is defined as:
+
+$$\text{Meta Model Output}(t) = w_v \cdot X_v(t) + w_p \cdot X_p(t) + w_a \cdot X_a(t)$$
+
+Where $w_v$, $w_p$, and $w_a$ are learned weights assigned to the respective baseline model outputs. The sign of the output (hopefully) tells the price direction at time ${t}$ (reminder: baseline model use data until $t-1$ to forecast target at $t$.)
+
+#### Prediction Target ####
+
+Signed value indicating the price direction. The value magnitude indicates the likelihood of the move in the sign direcction.
+
+#### Input Features ####
+
+As indicated in the introduction, we will use **price-volume**, **probability** and **price-time angle to probability** outputs from baseline models.
+
 # References #
 ## People ###
 [Edmond (Sinclair) Lubangakene](https://www.linkedin.com/in/edmond-lubangakene-882350298/)
