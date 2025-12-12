@@ -5,7 +5,7 @@ regularizers = keras.regularizers
 import numpy as np
 import pandas as pd
 
-def create_model(k:int, l2_rate: float, dropout_rate: float):
+def create_model(k: int, l2_rate: float, dropout_rate: float):
     """
     Creates the DNN model mapping current Price-Time Angles to Probability Difference Pd(t).
     
@@ -36,23 +36,22 @@ def create_model(k:int, l2_rate: float, dropout_rate: float):
     
     return model
 
-def create_inputs(historical_data: pd.DataFrame, k:int) -> np.ndarray:
+def create_inputs(historical_data: pd.DataFrame, k) -> np.ndarray:
     """
-    Extracts the 8 pre-calculated trig features for the Price-Time Angles.
-    Aligns rows with potential target NaNs.
+    Creates input features from t-1 to prevent data leakage.
+    The model should predict Pd(t) using features from t-1.
     """
     feature_cols = [
         'cos_θ1', 'sin_θ1', 'cos_θ2', 'sin_θ2', 
         'cos_θ3', 'sin_θ3', 'cos_θ4', 'sin_θ4'
     ]
-    target_cols = ['P↑', 'P↓']
-    
-    # Align rows by dropping NaNs present in either features or probability targets
-    df = historical_data[feature_cols + target_cols].dropna()
+    shifted_features = historical_data[feature_cols].shift(1)
+    df = pd.concat([shifted_features, historical_data[['P↑', 'P↓']]], axis=1)
+    df.dropna(inplace=True)
     
     return df[feature_cols].values
 
-def create_targets(historical_data: pd.DataFrame, k:int) -> np.ndarray:
+def create_targets(historical_data: pd.DataFrame, k) -> np.ndarray:
     """
     Creates target Pd(t) = P↑(t) - P↓(t) aligned with inputs.
     """
@@ -60,12 +59,10 @@ def create_targets(historical_data: pd.DataFrame, k:int) -> np.ndarray:
         'cos_θ1', 'sin_θ1', 'cos_θ2', 'sin_θ2', 
         'cos_θ3', 'sin_θ3', 'cos_θ4', 'sin_θ4'
     ]
-    target_cols = ['P↑', 'P↓']
+    shifted_features = historical_data[feature_cols].shift(1)
+    df = pd.concat([shifted_features, historical_data[['P↑', 'P↓']]], axis=1)
+    df.dropna(inplace=True)
     
-    # Align rows by dropping NaNs present in either features or probability targets
-    df = historical_data[feature_cols + target_cols].dropna()
-    
-    # Calculate Pd(t)
     pd_diff = df['P↑'] - df['P↓']
     
     return pd_diff.values

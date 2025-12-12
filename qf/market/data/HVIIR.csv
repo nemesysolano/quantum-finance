@@ -1,1 +1,2 @@
-Date,Open,High,Low,Close,Volume,Dividends,Stock Splits,Low_High_Avg,RV,Sd,Rs,G,Rf,Sf,R*,Ss,P↑,P↓,Y_High,Y_Close,Y_Low,cos_θ1,sin_θ1,cos_θ2,sin_θ2,cos_θ3,sin_θ3,cos_θ4,sin_θ4
+Date,Open,High,Low,Close,Volume,Dividends,Stock Splits,Low_High_Avg
+2025-12-11 00:00:00,0.25,0.31450000405311584,0.25,0.2849999964237213,64982,0.0,0.0,0.2822500020265579

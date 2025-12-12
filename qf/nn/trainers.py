@@ -12,7 +12,7 @@ from sklearn.linear_model import LinearRegression
 layers = tf.keras.layers
 regularizers = tf.keras.regularizers
 
-base_model_names = ('prob', 'pricevol', 'priceangle')
+base_model_names = ('prob', 'pricevol', 'priceangle', 'gauge')
 # -- base trainer module
 def base_trainer(args):
     ticker = args.ticker.upper()

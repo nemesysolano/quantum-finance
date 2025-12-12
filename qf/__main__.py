@@ -18,7 +18,8 @@ model_trainers = {
 base_model_factories = {
     'prob': base.probdiff,
     'pricevol': base.pricevoldiff,
-    'priceangle': base.priceangle
+    'priceangle': base.priceangle,
+    'gauge': base.gauge
 }
 
 if __name__ == '__main__': # 

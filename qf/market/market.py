@@ -2,10 +2,8 @@ import pandas as pd
 import yfinance as yf
 import os
 import re
-import numpy as np
-from typing import Callable, Union
 
-from qf.market.augmentation import add_breaking_gap, add_cosine_and_sine_for_price_time_angles, add_directional_probabilities, add_fast_swing_ratio, add_fast_trend_run, add_last_opposite, add_price_volume_strength_oscillator, add_relative_volume, add_slow_swing_ratio, add_slow_trend_run, add_structural_direction
+from qf.market.augmentation import add_boundary_energy_levels, add_breaking_gap, add_cosine_and_sine_for_price_time_angles, add_directional_probabilities, add_fast_swing_ratio, add_fast_trend_run, add_last_opposite, add_price_volume_strength_oscillator, add_relative_volume, add_slow_swing_ratio, add_slow_trend_run, add_structural_direction
 base_meta_border = 0.80
 
 def read_csv(path):
@@ -56,6 +54,7 @@ def import_market_data(symbol):
         add_price_volume_strength_oscillator(historical_data, "Close")
         add_price_volume_strength_oscillator(historical_data, "Low")       
         add_cosine_and_sine_for_price_time_angles(historical_data) 
+        add_boundary_energy_levels(historical_data)
         historical_data.to_csv(output_path)
         return historical_data
 
@@ -70,7 +69,12 @@ def import_market_all_data():
         symbols = [line.strip() for line in f]
     
     for symbol in symbols:
-        import_market_data(symbol)
+        try:
+            print(f"Importing data for {symbol}...")
+            import_market_data(symbol)
+            print(f"Data for {symbol} imported successfully.")
+        except Exception as e:
+            print(f"Failed to import data for {symbol}: {e}")
 
 def read_datasets(symbol):
     module_dir = os.path.dirname(__file__)

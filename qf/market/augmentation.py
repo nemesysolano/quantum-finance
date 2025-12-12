@@ -2,8 +2,10 @@ import numpy as np
 import pandas as pd
 
 # Ensure this import exists in your project structure
-from qf.stats.normalizers import default_quantization_delta 
-
+from qf.quantum import  maximum_energy_level, minimum_energy_level
+from qf.stats import empirical_distribution
+from qf.quantum import quantum_lambda
+from qf.context import default_quantization_level
 def add_structural_direction(historical_data: pd.DataFrame) -> pd.DataFrame:
     """
     Adds the structural direction column (S_d) to the DataFrame.
@@ -95,7 +97,7 @@ def add_fast_trend_run(historical_data: pd.DataFrame) -> pd.DataFrame:
     df.dropna(inplace=True)
     return df
 
-def add_breaking_gap(historical_data: pd.DataFrame, quantization_delta: float = default_quantization_delta) -> pd.DataFrame:
+def add_breaking_gap(historical_data: pd.DataFrame, quantization_level: float = default_quantization_level) -> pd.DataFrame:
     """
     Calculates and adds the Breaking Gap (G) to the DataFrame.
     Includes logic for linear decay based on the time elapsed since the last breach (k).
@@ -137,7 +139,7 @@ def add_breaking_gap(historical_data: pd.DataFrame, quantization_delta: float = 
             k = 1 # Reset counter (k=1 for first bar after breach, effectively)
         else:
             # Decay Logic: G(t) = max(G_b - k * Q, 0)
-            gaps[idx] = max(last_breach_val - (k * quantization_delta), 0.0)
+            gaps[idx] = max(last_breach_val - (k * quantization_level), 0.0)
             k += 1
 
     df['G'] = gaps    
@@ -528,3 +530,22 @@ def add_cosine_and_sine_for_price_time_angles(df):
     df.drop(columns=['is_pivot_high', 'is_pivot_low', 'ATR_14'], inplace=True, errors='ignore')
     df.dropna(inplace=True)
     return df
+
+
+def add_boundary_energy_levels(historical_data: pd.DataFrame, quantization_level: int = 1e2):
+    """
+    Calculates and adds the quantum boundary energy levels (E_low, E_high)
+    based on the empirical distribution of daily close price ratios (simple returns).
+    """
+    # Price Ratio (Simple Return) = P(t) / P(t-1)
+    daily_returns = (historical_data['Close'] / historical_data['Close'].shift(1)).dropna()
+    empirical_dist = empirical_distribution(daily_returns, quantization_level)
+    λ = quantum_lambda(empirical_dist['X'], empirical_dist['P'])
+    print(f"Computed quantum lambda: {λ}")
+    lower_boundaries = np.vectorize(lambda x: maximum_energy_level(x, λ))
+    upper_boundaries = np.vectorize(lambda x: minimum_energy_level(x, λ))
+    historical_data['E_Low'] = lower_boundaries(historical_data['Low'])
+    historical_data['E_High'] = upper_boundaries(historical_data['High'])
+    historical_data.dropna(inplace=True)
+
+    

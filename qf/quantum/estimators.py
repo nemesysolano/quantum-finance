@@ -28,7 +28,7 @@ def quantum_energy_level(l, n):
     E = np.cbrt(-half_q + sub_sqrt) + np.cbrt(-half_q - sub_sqrt)
     return E
 
-def quantum_energy_levels(l, minimum, maximum, extra_levels = 2):
+def quantum_energy_levels(l, minimum, maximum):
     k = 1
     E1 = quantum_energy_level(l, k)    
     E0 = E1
@@ -44,9 +44,33 @@ def quantum_energy_levels(l, minimum, maximum, extra_levels = 2):
         E1 = quantum_energy_level(l, k)
         E.append(E1)
 
-    for j in range(extra_levels):
-        k += 1
-        E.append(quantum_energy_level(l, k))
-
     return E
 
+def maximum_energy_level(x, l, max_n=100000):
+    """
+    Finds the highest energy level E^(n) that is strictly less than x.
+    """
+    last_E = -np.inf
+    # Start from n=0 to calculate energy levels
+    for n in range(max_n):
+        E_n = quantum_energy_level(l, n)
+        if E_n < x:
+            last_E = E_n
+        else:
+            # Energy levels are monotonically increasing, so we can stop
+            # once we find a level greater than or equal to x.
+            break
+    # Return the last found level that was less than x, or nan if none were.
+    return last_E if last_E > -np.inf else np.nan
+
+def minimum_energy_level(x, l, max_n=100000):
+    """
+    Finds the lowest energy level E^(n) that is strictly greater than x.
+    """
+    # Start from n=0 to calculate energy levels
+    for n in range(max_n):
+        E_n = quantum_energy_level(l, n)
+        if E_n > x:
+            return E_n
+    # If no level is found greater than x within max_n, return nan.
+    return np.nan
