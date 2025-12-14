@@ -8,3 +8,4 @@ scikit-learn
 mlx
 tensorflow-macos
 tensorflow-metal
+backtrader

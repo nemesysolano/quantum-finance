@@ -7,7 +7,7 @@ from qf.market.augmentation import add_boundary_energy_levels, add_breaking_gap,
 base_meta_border = 0.80
 
 def read_csv(path):
-    historical_data = pd.read_csv(path, parse_dates=True, date_format='%Y-%m-%d', index_col='Date')
+    historical_data = pd.read_csv(path, parse_dates=True, date_format='%Y-%m-%d %H:%M:%S', index_col='Date')
     return historical_data
 
 def remove_timezone_from_json_dates(file_path):
@@ -38,8 +38,7 @@ def import_market_data(symbol):
         historical_data = ticker.history(period="10y", interval="1d")  
         add_low_high_average(historical_data)
         historical_data.to_csv(output_path)        
-
-        remove_timezone_from_json_dates(output_path)
+        
         historical_data = read_csv(output_path)
         add_relative_volume(ticker, historical_data)
         add_structural_direction(historical_data)
@@ -56,10 +55,11 @@ def import_market_data(symbol):
         add_cosine_and_sine_for_price_time_angles(historical_data) 
         add_boundary_energy_levels(historical_data)
         historical_data.to_csv(output_path)
-        return historical_data
-
-
+    else:
+        historical_data = read_csv(output_path)
+        remove_timezone_from_json_dates(output_path)
     return read_csv(output_path)
+
 
 def import_market_all_data():    
     module_dir = os.path.dirname(__file__)

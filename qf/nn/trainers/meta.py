@@ -9,7 +9,8 @@ import qf.nn.models.base.pricevoldiff as pv_lib
 import qf.nn.models.base.probdiff as pd_lib
 import qf.nn.models.base.priceangle as ang_lib
 import qf.nn.models.base.gauge as gauge_lib
-import qf.nn as nn
+from qf.nn.trainers.base import base_trainer
+from types import SimpleNamespace
 
 base_model_names = ('pricevol', 'priceangle', 'gauge')
 
@@ -82,30 +83,32 @@ def get_limits(close_t, energy_evels, direction, risk_pct=0.01):
     return risk_dollars, reward_dollars
 # END OF NEW FUNCTION
 
-def load_base_models(args):
-    ticker = args.ticker.upper()
+def load_base_models(ticker):
     base_model_path = lambda name: os.path.join(os.getcwd(), 'models', f'{ticker}-{name}.keras')        
     for name in base_model_names:        
         if not os.path.exists(base_model_path(name)):
-            args.model = name
-            nn.base_trainer(args)
+            d = {
+                'epochs': 100,
+                'patience': 50,
+                'lookback': 14,
+                'l2_rate': 1e-6,
+                'dropout_rate': 0.20,
+                'scale_features': 'yes',
+                'ticker': ticker,
+                'model': name
+            }
+            args = SimpleNamespace(**d)
+            base_trainer(args)
 
     models = tuple([tf.keras.models.load_model(base_model_path(name)) for name in base_model_names])
     return models
 
-def train_and_test_ensemble(ticker, base_models, data, thresholds):
+def train_and_test_ensemble(base_models, data, thresholds):
     """
     Trains on PERCENTAGE targets, Backtests on DOLLAR P&L.
     """
-    # 1. Define Data Partitions (60/20/20 split standard)
-    n = len(data)
-    # Assuming base models trained on first 60%.
-    # We train meta-learner on next 20% (Validation).
-    meta_train_start, meta_train_end = int(n * 0.6), int(n * 0.8)
-    test_start = meta_train_end # Test on the final 20%
-
-    meta_train_data = data.iloc[meta_train_start:meta_train_end].copy()
-    test_data = data.iloc[test_start:]
+    # 1. Use the centralized dataset splitting from mkt.create_datasets
+    _, _, _, meta_train_data, test_data = mkt.create_datasets(data)
 
     # 2. TRAIN META-LEARNER (Level 1) using Linear Regression on PERCENTAGE
     meta_X_train = extract_meta_features(meta_train_data, base_models)
@@ -176,8 +179,7 @@ def train_and_test_ensemble(ticker, base_models, data, thresholds):
             equity_curve.append(equity_curve[-1] + pnl)
         
         results[threshold] = equity_curve
-
-    return results, meta_model
+    return test_data, results, meta_model
 
 def best_threshold(results):
     max_pnl = -float('inf')
@@ -190,17 +192,22 @@ def best_threshold(results):
             best_thresh = threshold
     return best_history, best_thresh, max_pnl
 
-def meta_trainer(args):
-    ticker = args.ticker.upper()    
+def meta_trainer_run(ticker):
     data = mkt.import_market_data(ticker)        
     
-    base_models = load_base_models(args)
+    base_models = load_base_models(ticker)
     # Thresholds represent PERCENTAGE moves now (0.005 = 0.5%, 0.01 = 1%)
     # This normalizes risk across $5 stocks and $1000 stocks.
     magnitude_thresholds = [5e-5, 0.001, 0.003, 0.005, 0.010, 0.015, 0.020, 0.030]
     
-    backtest_results, _ = train_and_test_ensemble(ticker, base_models, data, magnitude_thresholds)
+    test_data, backtest_results, meta_model = train_and_test_ensemble(base_models, data, magnitude_thresholds)
     best_hist, best_t, max_p = best_threshold(backtest_results)
+
+    return best_hist, test_data, max_p, meta_model
+
+def meta_trainer(args):
+    ticker = args.ticker.upper()
+    best_hist, test_data, max_p, meta_model = meta_trainer_run(ticker)
 
     output_file = os.path.join(os.getcwd(), "test-results", f"report-backtest.json")
     mode = 'a' if os.path.exists(output_file) else 'w'
