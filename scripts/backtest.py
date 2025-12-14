@@ -46,6 +46,43 @@ def extract_meta_features(historical_data, models, k=14):
     # Stack into feature matrix for the Meta-Learner
     return np.column_stack([corrected_pv, corrected_ang, corrected_g])
 
+# START OF NEW FUNCTION FOR RISK MANAGEMENT
+def get_limits(close_t, energy_evels, direction, risk_pct=0.01):
+    """
+    Calculates the dollar value of the Stop Loss (Risk) and Take Profit (Reward) 
+    targets based on the current price and a 1:3 Risk:Reward ratio.
+    
+    Args:
+        close_t (float): The closing price at time t.
+        risk_pct (float): The percentage of the price to use for the Stop Loss (Risk).
+                          Default is 1.0% (0.01).
+                          
+    Returns:
+        tuple: (risk_dollars, reward_dollars)
+    """
+
+    risk_dollars = 0
+    reward_dollars = 0
+    if type(energy_evels) is tuple:
+        e_low, e_high = energy_evels
+        # Optionally, you could use energy levels to adjust risk here.
+        # For simplicity, we are not using them in this calculation.
+        if direction == 1:  # LONG
+            risk_dollars = close_t - e_low
+            reward_dollars = e_high - close_t
+        elif direction == -1:  # SHORT
+            risk_dollars = e_high - close_t
+            reward_dollars = close_t - e_low
+
+    
+    # The Stop Loss is defined by the risk percentage of the entry price
+    risk_dollars = min(risk_dollars, close_t * risk_pct)
+    # The Take Profit is 3 times the risk (1:3 Risk:Reward)
+    reward_dollars = max(risk_dollars * 3, reward_dollars)
+    # These are the absolute dollar differences from the entry price.
+    return risk_dollars, reward_dollars
+# END OF NEW FUNCTION
+
 def load_base_models(args):
     ticker = args.ticker.upper()
     base_model_path = lambda name: os.path.join(os.getcwd(), 'models', f'{ticker}-{name}.keras')        
@@ -65,14 +102,9 @@ def train_and_test_ensemble(ticker, base_models, data, thresholds):
     n = len(data)
     # Assuming base models trained on first 60%.
     # We train meta-learner on next 20% (Validation).
-    meta_train_start, meta_train_end = int(n*0.8), int(n*0.9)
-    test_start = meta_train_end
-    # Base models are assumed to be trained on the first 60% of the data.
-    # We will train the meta-learner on the next 20% (the validation set).
     meta_train_start, meta_train_end = int(n * 0.6), int(n * 0.8)
     test_start = meta_train_end # Test on the final 20%
 
-    meta_train_data = data.iloc[meta_train_start:meta_train_end]
     meta_train_data = data.iloc[meta_train_start:meta_train_end].copy()
     test_data = data.iloc[test_start:]
 
@@ -91,28 +123,57 @@ def train_and_test_ensemble(ticker, base_models, data, thresholds):
     # 3. BACKTEST ON FINAL UNSEEN SET
     test_X_meta = extract_meta_features(test_data, base_models)
     test_prices = test_data['Close'].values[-len(test_X_meta)-1:]
-    
-    # Actual DOLLAR changes for P&L calculation (1 share)
-    actual_dollar_changes = np.diff(test_prices) 
+    test_E_High  = test_data['E_High'].values[-len(test_X_meta)-1:]
+    test_E_Low  = test_data['E_High'].values[-len(test_X_meta)-1:]
+
 
     # Predict Expected PERCENTAGE Move
     raw_predictions_pct = meta_model.predict(test_X_meta)
 
     results = {}
+    # Use 1% as the default risk percentage for the stop loss calculation
+    DEFAULT_RISK_PCT = 0.01 
+    
     for threshold in thresholds:
         equity_curve = [0]
         
         for i in range(len(test_X_meta)):
-            pred_pct = raw_predictions_pct[i]
+            pred_pct = raw_predictions_pct[i] 
+            entry_price = test_prices[i]
+            exit_price = test_prices[i+1] # The Close price on the next day
             
-            # Trading Logic: Filter based on predicted % magnitude
-            # e.g., Threshold 0.005 means we need > 0.5% predicted move
+            # Calculate Risk (R) and Reward (3R) in dollars
+            direction = 1 if pred_pct > threshold else -1 if pred_pct < -threshold else 0
+            risk_dollars, reward_dollars = get_limits(entry_price, (test_E_Low[i], test_E_High[i]), direction)
+            
             pnl = 0
-            if pred_pct > threshold: # LONG
-                pnl = actual_dollar_changes[i]
-            elif pred_pct < -threshold: # SHORT
-                pnl = -actual_dollar_changes[i]
+            
+            if pred_pct > threshold: # LONG TRADE
+                sl_limit = entry_price - risk_dollars
+                tp_limit = entry_price + reward_dollars
                 
+                if exit_price <= sl_limit:
+                    pnl = -risk_dollars  # Hit Stop Loss (Loss = -R)
+                elif exit_price >= tp_limit:
+                    pnl = reward_dollars # Hit Take Profit (Gain = +3R)
+                else:
+                    # Close-to-close P&L if neither limit was hit
+                    pnl = exit_price - entry_price 
+                    
+            elif pred_pct < -threshold: # SHORT TRADE
+                sl_limit = entry_price + risk_dollars
+                tp_limit = entry_price - reward_dollars
+                
+                if exit_price >= sl_limit:
+                    pnl = -risk_dollars # Hit Stop Loss (Loss = -R)
+                elif exit_price <= tp_limit:
+                    pnl = reward_dollars # Hit Take Profit (Gain = +3R)
+                else:
+                    # Close-to-close P&L
+                    pnl = -(exit_price - entry_price) # Negative of the price change
+                
+            # If no trade (prediction inside threshold), pnl remains 0
+            
             equity_curve.append(equity_curve[-1] + pnl)
         
         results[threshold] = equity_curve

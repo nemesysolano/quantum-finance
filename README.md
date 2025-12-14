@@ -364,6 +364,12 @@ where:
 
 The **Schrödinger Gauge** $Ö(t)$ acts as a quantum-aware volatility and momentum indicator governing the asset's movement at time $t$. For language convenience, we will refer to $E^{(n_1)}$ and $E^{(n_2)}$ as **boundary energy levels**.
 
+| Gauge Value Range | Gauge Sign ($Ö(t)$) | Price Location Relative to Boundaries | Correlated Price Direction ($r_p(t)$) | **Contrarian Trade Signal** |
+| :---: | :---: | :--- | :---: | :---: |
+| $[0, 1]$ | **Positive** ($Ö(t)>0$) | Closer to the **Upper Boundary** ($E^{(n_2)}$) | Downwards ($\downarrow$) | **SELL** (Short) |
+| $[-1, 0]$ | **Negative** ($Ö(t)<0$) | Closer to the **Lower Boundary** ($E^{(n_1)}$) | Upwards ($\uparrow$) | **BUY** (Long) |
+
+
 ## Quantum Forecast Models ##
 
 ### Schrödinger Gauge Forecast ###
@@ -393,13 +399,9 @@ Where $w_v$, $w_g$, and $w_a$ are learned weights assigned to the respective bas
 
 The Schrödinger Gauge $Ö(t)$ acts as a contrarian indicator because its sign indicates the current price's proximity to a structural energy boundary, which often precedes a direction change.
 
-| Gauge Value Range | Gauge Sign ($Ö(t)$) | Price Location Relative to Boundaries | Correlated Price Direction ($r_p(t)$) | **Contrarian Trade Signal** |
-| :---: | :---: | :--- | :---: | :---: |
-| $[0, 1]$ | **Positive** ($Ö(t)>0$) | Closer to the **Upper Boundary** ($E^{(n_2)}$) | Downwards ($\downarrow$) | **SELL** (Short) |
-| $[-1, 0]$ | **Negative** ($Ö(t)<0$) | Closer to the **Lower Boundary** ($E^{(n_1)}$) | Upwards ($\uparrow$) | **BUY** (Long) |
-
+### Input Roles ###
 | Meta-Feature | Base Model | Concept | Role in Trading Signal | Status |
 | :--- | :--- | :--- | :--- | :--- |
 | $\hat{Y}_d(t)$ | Price-Volume Difference | **Classical Kinetic** (Momentum) | Directional prediction, tends to favor short-term trend following. | **Active** |
 | $\hat{X}_a(t)$ | Price-Angle Forecast | **Probabilistic Contrarian** (Geometry) | Forecasts probability difference $P_d(t)$, tends to favor structural reversion. | **Active** |
-| $\hat{Ö}(t)$ | Schrödinger Gauge | **Quantum Structural** (Boundary Proximity) | **Sign Corrector.** This model's current sign is used to align the combined linear output, acting as a structural anchor. | **Active** |
+| $\hat{Ö}(t)$ | Schrödinger Gauge | **Quantum Structural** (Boundary Proximity) | **Sign Corrector.** This model's current sign is used to align the combined linear output, acting as a structural anchor. | 
