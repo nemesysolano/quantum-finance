@@ -2,6 +2,8 @@ import qf.market as mkt
 import numpy as np
 import matplotlib.pyplot as plt
 import mplfinance as mpf
+from qf.nn.trainers import base_trainer
+from qf.nn.trainers import meta_trainer
 from qf.quantum.estimators import quantum_energy_levels, quantum_lambda
 from qf.stats.distributions import empirical_distribution
 import qf.nn.models.base as base
@@ -11,8 +13,8 @@ import argparse
 
 
 model_trainers = {
-    'base': nn.base_trainer,
-    'meta': nn.meta_trainer
+    'base': base_trainer,
+    'meta': meta_trainer
 }
 
 base_model_factories = {
