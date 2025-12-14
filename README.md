@@ -230,7 +230,10 @@ The model uses a fixed **lookback window of $k$ bars** (from $t-1$ to $t-k$) and
 
 where $Y_d(τ) = Y(τ) - Y(τ-1)$
 
-### Price-Time Angle to Probability Difference Function ###
+---
+NOTE: This model was excluded from the final Meta-Model architecture due to high collinearity with the _Price-Angle Forecast_ described below which was empirically shown to provide a cleaner signal.
+
+### Price-Time Angle Forecast ###
 
 Consider the four price-time angles ${θ_1(t-1)}$, ${θ_2(t-1)}$, ${θ_3(t-1)}$ and ${θ_4(t-1)}$ ruling at time ${t-1}$. We will now draft prediction target and input features for a 
 DNN model aiming at binding price-time angles to probability difference $P_d(t)$.
@@ -245,20 +248,10 @@ A sequence containing $\cos$ and $\sin$ for each price-time angle.
 
 $\{\cos θ_1(t-1), \sin θ_1(t-1), \cos θ_2(t-1), \sin θ_2(t-1), \cos θ_3(t-1), \sin θ_3(t-1), \cos θ_4(t-1), \sin θ_4(t-1)\}$
 
-## The Meta Model ##
-
-Let $X_v(t)$, $X_p(t)$ and $X_a(t)$ be **price-volume**, **probability** and **price-time angle to probability** outputs from the three aforementioned base line models. The 
-meta model linearly combines this three outputs to produce a signed prediction.
-
-The linear combination is defined as:
-
-$$\text{Meta Model Output}(t) = w_v \cdot X_v(t) + w_p \cdot X_p(t) + w_a \cdot X_a(t)$$
-
-Where $w_v$, $w_p$, and $w_a$ are learned weights assigned to the respective baseline model outputs. The sign of the output (hopefully) tells the price direction at time ${t}$ (reminder: baseline model use data until $t-1$ to forecast target at $t$.)
 
 #### Prediction Target ####
 
-Signed value indicating the price direction. The value magnitude indicates the likelihood of the move in the sign direcction.
+Signed signed $P_d(t)$ indicating the price direction. The value magnitude indicates the likelihood of the move in the sign direcction.
 
 #### Input Features ####
 
@@ -389,7 +382,14 @@ Last $k$ actual schrödinger gauge values.
 | :--- | :--- | :--- | :--- |
 | $Ö(t-1)$ | $Ö(t-2)$ | ... | $Ö(t-k)$ |
 
----
+## The Meta Model ##
+
+Let $X_v(t)$, $X_g(t)$ and $X_a(t)$ be **price-volume**, **scrodinger gauge** and **price-time angle** outputs from the three aforementioned base line models. The 
+meta model linearly combines this three outputs to produce a signed prediction. The linear combination is defined as:
+
+$$\text{Meta Model Output}(t) = w_v \cdot X_v(t) + w_g \cdot X_g(t) + w_a \cdot X_a(t)$$
+
+Where $w_v$, $w_g$, and $w_a$ are learned weights assigned to the respective baseline model outputs. The sign of the output (hopefully) tells the price direction at time ${t}$ (reminder: baseline model use data until $t-1$ to forecast target at $t$.)
 
 The Schrödinger Gauge $Ö(t)$ acts as a contrarian indicator because its sign indicates the current price's proximity to a structural energy boundary, which often precedes a direction change.
 
@@ -397,3 +397,9 @@ The Schrödinger Gauge $Ö(t)$ acts as a contrarian indicator because its sign i
 | :---: | :---: | :--- | :---: | :---: |
 | $[0, 1]$ | **Positive** ($Ö(t)>0$) | Closer to the **Upper Boundary** ($E^{(n_2)}$) | Downwards ($\downarrow$) | **SELL** (Short) |
 | $[-1, 0]$ | **Negative** ($Ö(t)<0$) | Closer to the **Lower Boundary** ($E^{(n_1)}$) | Upwards ($\uparrow$) | **BUY** (Long) |
+
+| Meta-Feature | Base Model | Concept | Role in Trading Signal | Status |
+| :--- | :--- | :--- | :--- | :--- |
+| $\hat{Y}_d(t)$ | Price-Volume Difference | **Classical Kinetic** (Momentum) | Directional prediction, tends to favor short-term trend following. | **Active** |
+| $\hat{X}_a(t)$ | Price-Angle Forecast | **Probabilistic Contrarian** (Geometry) | Forecasts probability difference $P_d(t)$, tends to favor structural reversion. | **Active** |
+| $\hat{Ö}(t)$ | Schrödinger Gauge | **Quantum Structural** (Boundary Proximity) | **Sign Corrector.** This model's current sign is used to align the combined linear output, acting as a structural anchor. | **Active** |

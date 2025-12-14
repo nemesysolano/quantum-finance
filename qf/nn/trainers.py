@@ -7,7 +7,7 @@ from qf.stats.distributions import empirical_distribution
 import qf.nn as nn
 import tensorflow as tf
 import os
-from qf.nn.models.base import priceangle, pricevoldiff, probdiff
+from qf.nn.models.base import priceangle, pricevoldiff, probdiff, gauge
 from sklearn.linear_model import LinearRegression
 layers = tf.keras.layers
 regularizers = tf.keras.regularizers
@@ -89,45 +89,49 @@ def base_trainer(args):
 #--- meta trainer module
 def load_base_models(args):
     ticker = args.ticker.upper()
-    base_model_path = lambda name: os.path.join(os.getcwd(), 'models', f'{ticker}-{name}.keras')    
-    if not  os.path.exists(base_model_path):
-        for name in base_model_names:
+    base_model_path = lambda name: os.path.join(os.getcwd(), 'models', f'{ticker}-{name}.keras')            
+    for name in base_model_names:
+        if not os.path.exists(base_model_path(name)):        
             args.model = name
             base_trainer(args)
 
     return tuple([tf.keras.models.load_model(base_model_path(name)) for name in base_model_names])
 
 class CompoundModel:
-    def __init__(self, prob_model, pricevol_model, priceangle_model):
+    def __init__(self, prob_model, pricevol_model, priceangle_model, gauge_model):
         self.prob_model = prob_model
         self.pricevol_model = pricevol_model
         self.priceangle_model = priceangle_model
+        self.gauge_model = gauge_model
 
-    def __call__(self, pricevol_inputs, prob_inputs, priceangle_inputs):
+    def __call__(self, pricevol_inputs, prob_inputs, priceangle_inputs, gauge_inputs):
         pricevol_prediction = self.pricevol_model.predict(pricevol_inputs)
         prob_prediction = self.prob_model.predict(prob_inputs)
         priceangle_prediction = self.priceangle_model.predict(priceangle_inputs)
+        gauge_prediction = self.gauge_model.predict(gauge_inputs)
         
         # NOTE: Inverting Prob and Angle outputs due to contrarian nature
         stacked = np.hstack([
             pricevol_prediction, 
             -1.0 * prob_prediction, 
-            -1.0 * priceangle_prediction
+            -1.0 * priceangle_prediction,
+            gauge_prediction
         ])
 
         return stacked
 
-def trim_to_smallest(pricevol_inputs, prob_inputs, priceangle_inputs):
-    min_len = min(len(pricevol_inputs), len(prob_inputs), len(priceangle_inputs))
-    return  (pricevol_inputs[:min_len], prob_inputs[:min_len], priceangle_inputs[:min_len])
+def trim_to_smallest(pricevol_inputs, prob_inputs, priceangle_inputs, gauge_inputs):
+    min_len = min(len(pricevol_inputs), len(prob_inputs), len(priceangle_inputs), len(gauge_inputs))
+    return  (pricevol_inputs[:min_len], prob_inputs[:min_len], priceangle_inputs[:min_len], gauge_inputs[:min_len])
 
 def create_inputs(historical_data, k, compound_model):
-    (pricevol_inputs, prob_inputs, priceangle_inputs) =  trim_to_smallest(
+    (pricevol_inputs, prob_inputs, priceangle_inputs, gauge_inputs) =  trim_to_smallest(
         pricevoldiff.create_inputs(historical_data, k), 
         probdiff.create_inputs(historical_data, k),  
-        priceangle.create_inputs(historical_data, k)
+        priceangle.create_inputs(historical_data, k),
+        gauge.create_inputs(historical_data, k)
     )
-    return compound_model(pricevol_inputs, prob_inputs, priceangle_inputs)
+    return compound_model(pricevol_inputs, prob_inputs, priceangle_inputs, gauge_inputs)
 
 def create_targets(historical_data, min_len):
     """
@@ -145,8 +149,8 @@ def create_targets(historical_data, min_len):
     
 def meta_trainer(args):
     (_, _, _, meta_train, meta_trade) = mkt.read_datasets(args.ticker)
-    (prob_model, pricevol_model, priceangle_model) = load_base_models(args)
-    compound_model = CompoundModel(prob_model, pricevol_model, priceangle_model)
+    (prob_model, pricevol_model, priceangle_model, gauge_model) = load_base_models(args)
+    compound_model = CompoundModel(prob_model, pricevol_model, priceangle_model, gauge_model)
     k = args.lookback    
     
     # Generate Inputs

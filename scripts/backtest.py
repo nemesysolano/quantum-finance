@@ -8,42 +8,43 @@ import matplotlib.pyplot as plt
 import qf.nn.models.base.pricevoldiff as pv_lib
 import qf.nn.models.base.probdiff as pd_lib
 import qf.nn.models.base.priceangle as ang_lib
-import sys
+import qf.nn.models.base.gauge as gauge_lib
 import qf.nn as nn
 import argparse
 
-base_model_names = ('prob', 'pricevol', 'priceangle')
+base_model_names = ('pricevol', 'priceangle', 'gauge')
 
 def extract_meta_features(historical_data, models, k=14):
     """
     Executes all three base models and applies the logical sign corrections 
     to create a aligned dataset for the Meta-Learner.
     """
-    m_pv, m_pd, m_ang = models
+    m_pv, m_ang, m_g = models
 
     # Generate raw inputs for each model
     X_pv = pv_lib.create_inputs(historical_data, k)
-    X_pd = pd_lib.create_inputs(historical_data, k)
     X_ang = ang_lib.create_inputs(historical_data, k) 
-    
+    X_g = gauge_lib.create_inputs(historical_data, k)
+
     # Align sample sizes
-    min_samples = min(len(X_pv), len(X_pd), len(X_ang))
-    X_pv, X_pd, X_ang = X_pv[-min_samples:], X_pd[-min_samples:], X_ang[-min_samples:]
+    min_samples = min(len(X_pv), len(X_ang), len(X_g))
+    X_pv, X_ang, X_g = X_pv[-min_samples:],  X_ang[-min_samples:], X_g[-min_samples:]
     
     # Get Raw Model Predictions
     y_pv_raw = m_pv.predict(X_pv).flatten()
-    y_pd_raw = m_pd.predict(X_pd).flatten()
     y_ang_raw = m_ang.predict(X_ang).flatten()
-    
+    y_g_raw = m_g.predict(X_g).flatten()
+
     # APPLY TRADING SYSTEM LOGIC (Sign Corrections)
     # Price-Volume: Direct Predictor (Keep Sign)
     # Prob-Diff & Angles: Contrarian Predictors (Invert Sign)
+    # Gauge: Direct Predictor (Keep Sign)
     corrected_pv = y_pv_raw
-    corrected_pd = -1.0 * y_pd_raw
-    corrected_ang = -1.0 * y_ang_raw
-    
+    corrected_ang = y_ang_raw
+    corrected_g = y_g_raw
+
     # Stack into feature matrix for the Meta-Learner
-    return np.column_stack([corrected_pv, corrected_pd, corrected_ang])
+    return np.column_stack([corrected_pv, corrected_ang, corrected_g])
 
 def load_base_models(args):
     ticker = args.ticker.upper()
@@ -53,7 +54,8 @@ def load_base_models(args):
             args.model = name
             nn.base_trainer(args)
 
-    return tuple([tf.keras.models.load_model(base_model_path(name)) for name in base_model_names])
+    models = tuple([tf.keras.models.load_model(base_model_path(name)) for name in base_model_names])
+    return models
 
 def train_and_test_ensemble(ticker, base_models, data, thresholds):
     """
@@ -65,8 +67,13 @@ def train_and_test_ensemble(ticker, base_models, data, thresholds):
     # We train meta-learner on next 20% (Validation).
     meta_train_start, meta_train_end = int(n*0.8), int(n*0.9)
     test_start = meta_train_end
+    # Base models are assumed to be trained on the first 60% of the data.
+    # We will train the meta-learner on the next 20% (the validation set).
+    meta_train_start, meta_train_end = int(n * 0.6), int(n * 0.8)
+    test_start = meta_train_end # Test on the final 20%
 
     meta_train_data = data.iloc[meta_train_start:meta_train_end]
+    meta_train_data = data.iloc[meta_train_start:meta_train_end].copy()
     test_data = data.iloc[test_start:]
 
     # 2. TRAIN META-LEARNER (Level 1) using Linear Regression on PERCENTAGE
@@ -141,12 +148,10 @@ if __name__ == "__main__":
     ticker = args.ticker.upper()    
     data = mkt.import_market_data(ticker)        
     
-    pv_model, pd_model, ang_model = load_base_models(args)
-    base_models = (pv_model, pd_model, ang_model)
-    
+    base_models = load_base_models(args)
     # Thresholds represent PERCENTAGE moves now (0.005 = 0.5%, 0.01 = 1%)
     # This normalizes risk across $5 stocks and $1000 stocks.
-    magnitude_thresholds = [0.001, 0.003, 0.005, 0.010, 0.015, 0.020, 0.030]
+    magnitude_thresholds = [5e-5, 0.001, 0.003, 0.005, 0.010, 0.015, 0.020, 0.030]
     
     backtest_results, _ = train_and_test_ensemble(ticker, base_models, data, magnitude_thresholds)
     best_hist, best_t, max_p = best_threshold(backtest_results)
