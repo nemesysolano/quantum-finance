@@ -95,7 +95,7 @@ def create_datasets(dataset):
     base_test = dataset[val_end:test_end]
 
     # As per the logic, meta_train is an overlap with base_test
-    meta_train = base_test
+    meta_train = base_test.copy()
     meta_trade = dataset[test_end:]
 
     return base_train, base_val, base_test, meta_train, meta_trade

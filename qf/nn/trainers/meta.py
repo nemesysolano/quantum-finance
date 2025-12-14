@@ -46,21 +46,7 @@ def extract_meta_features(historical_data, models, k=14):
     # Stack into feature matrix for the Meta-Learner
     return np.column_stack([corrected_pv, corrected_ang, corrected_g])
 
-# START OF NEW FUNCTION FOR RISK MANAGEMENT
-def get_limits(close_t, energy_evels, direction, risk_pct=0.01):
-    """
-    Calculates the dollar value of the Stop Loss (Risk) and Take Profit (Reward) 
-    targets based on the current price and a 1:3 Risk:Reward ratio.
-    
-    Args:
-        close_t (float): The closing price at time t.
-        risk_pct (float): The percentage of the price to use for the Stop Loss (Risk).
-                          Default is 1.0% (0.01).
-                          
-    Returns:
-        tuple: (risk_dollars, reward_dollars)
-    """
-
+def get_limits(close_t, energy_evels, direction, risk_pct=0.01):    
     risk_dollars = 0
     reward_dollars = 0
     if type(energy_evels) is tuple:
@@ -81,7 +67,6 @@ def get_limits(close_t, energy_evels, direction, risk_pct=0.01):
     reward_dollars = max(risk_dollars * 3, reward_dollars)
     # These are the absolute dollar differences from the entry price.
     return risk_dollars, reward_dollars
-# END OF NEW FUNCTION
 
 def load_base_models(ticker):
     base_model_path = lambda name: os.path.join(os.getcwd(), 'models', f'{ticker}-{name}.keras')        
@@ -105,17 +90,17 @@ def load_base_models(ticker):
 
 def train_and_test_ensemble(base_models, data, thresholds):
     """
-    Trains on PERCENTAGE targets, Backtests on DOLLAR P&L.
+    Trains on PERCENTAGE targets, Backtests on DOLLAR P&L with risk-managed position sizing.
     """
     # 1. Use the centralized dataset splitting from mkt.create_datasets
     _, _, _, meta_train_data, test_data = mkt.create_datasets(data)
 
     # 2. TRAIN META-LEARNER (Level 1) using Linear Regression on PERCENTAGE
+    # ... (Meta-Learner training logic remains unchanged) ...
     meta_X_train = extract_meta_features(meta_train_data, base_models)
     
     # Calculate Percentage Change Targets for Training: (C_t+1 - C_t) / C_t
     meta_prices = meta_train_data['Close'].values[-len(meta_X_train)-1:]
-    # np.diff(p) is (p[i+1]-p[i]), divide by p[i] for percentage
     meta_y_train = np.diff(meta_prices) / meta_prices[:-1] 
 
     meta_model = LinearRegression()
@@ -128,54 +113,82 @@ def train_and_test_ensemble(base_models, data, thresholds):
     test_E_High  = test_data['E_High'].values[-len(test_X_meta)-1:]
     test_E_Low  = test_data['E_High'].values[-len(test_X_meta)-1:]
 
-
     # Predict Expected PERCENTAGE Move
     raw_predictions_pct = meta_model.predict(test_X_meta)
 
+    # --- POSITION SIZING CONSTANTS ---
+    STARTING_CAPITAL = 100000.0   # $100,000 Starting Portfolio Value
+    MAX_EQUITY_RISK_PCT = 0.01   # Max 1.0% of equity risked per trade
+    # ---------------------------------
+
     results = {}
-    # Use 1% as the default risk percentage for the stop loss calculation
     DEFAULT_RISK_PCT = 0.01 
     
     for threshold in thresholds:
+        # equity_curve tracks CUMULATIVE P&L (starts at 0)
         equity_curve = [0]
+        # current_equity tracks TOTAL CAPITAL (starts at STARTING_CAPITAL)
+        current_equity = STARTING_CAPITAL 
         
         for i in range(len(test_X_meta)):
             pred_pct = raw_predictions_pct[i] 
             entry_price = test_prices[i]
             exit_price = test_prices[i+1] # The Close price on the next day
             
-            # Calculate Risk (R) and Reward (3R) in dollars
+            pnl = 0
+            share_count = 0
+            
+            # Calculate Risk (R) and Reward (3R) in dollars (per share)
             direction = 1 if pred_pct > threshold else -1 if pred_pct < -threshold else 0
             risk_dollars, reward_dollars = get_limits(entry_price, (test_E_Low[i], test_E_High[i]), direction)
             
-            pnl = 0
+            if direction != 0 and risk_dollars > 0:
+                
+                # 1. Determine Maximum Dollar Risk allowed from total equity
+                dollar_risk_limit = current_equity * MAX_EQUITY_RISK_PCT
+
+                # 2. Calculate Shares based on Risk Parity
+                # Shares = (Max Dollar Risk) / (Dollar Risk per Share)
+                # Use np.floor for whole shares
+                share_count = np.floor(dollar_risk_limit / risk_dollars)
+                
+                # 3. Enforce Affordability (Ensure we don't buy more shares than we can afford)
+                max_affordable_shares = np.floor(current_equity / entry_price)
+                share_count = min(share_count, max_affordable_shares)
+                
+                if share_count >= 1: # Trade only if we can afford at least one risk-managed share
+
+                    if pred_pct > threshold: # LONG TRADE
+                        sl_limit = entry_price - risk_dollars
+                        tp_limit = entry_price + reward_dollars
+                        
+                        if exit_price <= sl_limit:
+                            pnl = -risk_dollars  # Hit Stop Loss (Loss = -R per share)
+                        elif exit_price >= tp_limit:
+                            pnl = reward_dollars # Hit Take Profit (Gain = +3R per share)
+                        else:
+                            # Close-to-close P&L if neither limit was hit (per share)
+                            pnl = exit_price - entry_price 
+                            
+                    elif pred_pct < -threshold: # SHORT TRADE
+                        sl_limit = entry_price + risk_dollars
+                        tp_limit = entry_price - reward_dollars
+                        
+                        if exit_price >= sl_limit:
+                            pnl = -risk_dollars # Hit Stop Loss (Loss = -R per share)
+                        elif exit_price <= tp_limit:
+                            pnl = reward_dollars # Hit Take Profit (Gain = +3R per share)
+                        else:
+                            # Close-to-close P&L (per share)
+                            pnl = -(exit_price - entry_price) # Negative of the price change
+
+                    # Apply Position Sizing to the P&L
+                    pnl *= share_count
             
-            if pred_pct > threshold: # LONG TRADE
-                sl_limit = entry_price - risk_dollars
-                tp_limit = entry_price + reward_dollars
-                
-                if exit_price <= sl_limit:
-                    pnl = -risk_dollars  # Hit Stop Loss (Loss = -R)
-                elif exit_price >= tp_limit:
-                    pnl = reward_dollars # Hit Take Profit (Gain = +3R)
-                else:
-                    # Close-to-close P&L if neither limit was hit
-                    pnl = exit_price - entry_price 
-                    
-            elif pred_pct < -threshold: # SHORT TRADE
-                sl_limit = entry_price + risk_dollars
-                tp_limit = entry_price - reward_dollars
-                
-                if exit_price >= sl_limit:
-                    pnl = -risk_dollars # Hit Stop Loss (Loss = -R)
-                elif exit_price <= tp_limit:
-                    pnl = reward_dollars # Hit Take Profit (Gain = +3R)
-                else:
-                    # Close-to-close P&L
-                    pnl = -(exit_price - entry_price) # Negative of the price change
-                
-            # If no trade (prediction inside threshold), pnl remains 0
+            # Update Equity for the next sizing calculation
+            current_equity += pnl 
             
+            # Update the Cumulative P&L Curve (for reporting)
             equity_curve.append(equity_curve[-1] + pnl)
         
         results[threshold] = equity_curve
@@ -214,4 +227,4 @@ def meta_trainer(args):
     with open(output_file, mode) as f:
         if mode == 'w':
             print("{", file=f) 
-        print(f"\"\", \"{ticker}\": {best_hist},", file=f)
+        print(f"\"{ticker}\": {best_hist},", file=f)
