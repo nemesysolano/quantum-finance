@@ -90,7 +90,8 @@ def load_base_models(ticker):
 
 def train_and_test_ensemble(base_models, data, thresholds):
     """
-    Trains on PERCENTAGE targets, Backtests on DOLLAR P&L with risk-managed position sizing.
+    Refactored to ELIMINATE DATA LEAKAGE.
+    Aligns Prediction (Day T) with Execution (Day T+1).
     """
     # 1. Use the centralized dataset splitting from mkt.create_datasets
     _, _, _, meta_train_data, test_data = mkt.create_datasets(data)
@@ -105,99 +106,108 @@ def train_and_test_ensemble(base_models, data, thresholds):
 
     meta_model = LinearRegression()
     meta_model.fit(meta_X_train, meta_y_train)
-    # print(f"Meta-Learner Trained for {ticker} on % targets.")
 
-    # 3. BACKTEST ON FINAL UNSEEN SET
-    test_X_meta = extract_meta_features(test_data, base_models)
-    test_prices = test_data['Close'].values[-len(test_X_meta)-1:]
-    test_E_High  = test_data['E_High'].values[-len(test_X_meta)-1:]
-    # CORRECTED BUG: Used 'E_Low' here instead of 'E_High' copy
-    test_E_Low  = test_data['E_Low'].values[-len(test_X_meta)-1:] 
+    # 3. BACKTEST ON FINAL UNSEEN SET WITH LEAKAGE FIX
+    
+    # Generate Features for ALL test days
+    test_X_all = extract_meta_features(test_data, base_models)
+    
+    # LEAKAGE FIX: 
+    # We predict using data up to Close of Day T. 
+    # We execute at Open of Day T+1.
+    # Therefore, we cannot trade on the very last day of data (no T+1 price).
+    
+    # Slice Features: Exclude the last day (Day N) because we can't trade N+1.
+    test_X_meta = test_X_all[:-1]
+    
+    # Slice Execution Prices: 
+    # We want the prices for T+1.
+    # Since test_X_all corresponds to test_data[k:], 
+    # test_X_meta corresponds to test_data[k : N-1].
+    # The execution prices should be test_data[k+1 : N].
+    # This is exactly the last len(test_X_meta) rows of the dataset.
+    execution_length = len(test_X_meta)
+    
+    # Price arrays for Execution (Day T+1)
+    test_opens  = test_data['Open'].values[-execution_length:] # Open(T+1)
+    test_closes = test_data['Close'].values[-execution_length:] # Close(T+1)
+    test_highs  = test_data['High'].values[-execution_length:] # High(T+1)
+    test_lows   = test_data['Low'].values[-execution_length:] # Low(T+1)
+    
+    test_E_High = test_data['E_High'].values[-execution_length:]
+    test_E_Low  = test_data['E_Low'].values[-execution_length:] 
 
-    # Predict Expected PERCENTAGE Move
+    # Predict Expected PERCENTAGE Move based on Day T features
     raw_predictions_pct = meta_model.predict(test_X_meta)
 
     # --- POSITION SIZING CONSTANTS ---
-    STARTING_CAPITAL = 10000.0   # $100,000 Starting Portfolio Value
+    STARTING_CAPITAL = 10000.0   # $10,000 Starting Portfolio Value
     MAX_EQUITY_RISK_PCT = 0.01   # Max 1.0% of equity risked per trade
-    # --- BROKERAGE CONSTANTS ---
-    # The brokerage fee replaces the high Performance Fee for a more realistic transaction cost model.
-    BROKER_COMMISSION_PER_SHARE = 0.002 # $0.002 per share (typical low-cost broker)
+    BROKER_COMMISSION_PER_SHARE = 0.002 
     # ---------------------------------
 
     results = {}
-    DEFAULT_RISK_PCT = 0.01 
     
     for threshold in thresholds:
-        # equity_curve tracks CUMULATIVE P&L (starts at 0)
         equity_curve = [0]
-        # current_equity tracks TOTAL CAPITAL (starts at STARTING_CAPITAL)
         current_equity = STARTING_CAPITAL 
         
         for i in range(len(test_X_meta)):
             pred_pct = raw_predictions_pct[i] 
-            entry_price = test_prices[i]
-            exit_price = test_prices[i+1] # The Close price on the next day
+            entry_price = test_opens[i] 
+            close_price = test_closes[i] 
+            high_price = test_highs[i] 
+            low_price = test_lows[i] 
             
             pnl = 0
             share_count = 0
             
-            # Calculate Risk (R) and Reward (3R) in dollars (per share)
+            # Calculate Risk (R) and Reward (3R)
             direction = 1 if pred_pct > threshold else -1 if pred_pct < -threshold else 0
             risk_dollars, reward_dollars = get_limits(entry_price, (test_E_Low[i], test_E_High[i]), direction)
             
             if direction != 0 and risk_dollars > 0:
                 
-                # 1. Determine Maximum Dollar Risk allowed from total equity
+                # 1. Position Sizing
                 dollar_risk_limit = current_equity * MAX_EQUITY_RISK_PCT
-
-                # 2. Calculate Shares based on Risk Parity
-                # Shares = (Max Dollar Risk) / (Dollar Risk per Share)
-                # Use np.floor for whole shares
                 share_count = np.floor(dollar_risk_limit / risk_dollars)
                 
-                # 3. Enforce Affordability (Ensure we don't buy more shares than we can afford)
+                # 2. Affordability Check
                 max_affordable_shares = np.floor(current_equity / entry_price)
                 share_count = min(share_count, max_affordable_shares)
                 
-                if share_count >= 1: # Trade only if we can afford at least one risk-managed share
-
-                    if pred_pct > threshold: # LONG TRADE
+                if share_count >= 1: 
+                    
+                    if pred_pct > threshold: # LONG
                         sl_limit = entry_price - risk_dollars
                         tp_limit = entry_price + reward_dollars
                         
-                        if exit_price <= sl_limit:
-                            pnl = -risk_dollars  # Hit Stop Loss (Loss = -R per share)
-                        elif exit_price >= tp_limit:
-                            pnl = reward_dollars # Hit Take Profit (Gain = +3R per share)
+                        # Intra-day Logic: Check Low for SL, then High for TP
+                        if low_price <= sl_limit:
+                            pnl = -risk_dollars 
+                        elif high_price >= tp_limit:
+                            pnl = reward_dollars 
                         else:
-                            # Close-to-close P&L if neither limit was hit (per share)
-                            pnl = exit_price - entry_price 
+                            pnl = close_price - entry_price 
                             
-                    elif pred_pct < -threshold: # SHORT TRADE
+                    elif pred_pct < -threshold: # SHORT
                         sl_limit = entry_price + risk_dollars
                         tp_limit = entry_price - reward_dollars
                         
-                        if exit_price >= sl_limit:
-                            pnl = -risk_dollars # Hit Stop Loss (Loss = -R per share)
-                        elif exit_price <= tp_limit:
-                            pnl = reward_dollars # Hit Take Profit (Gain = +3R per share)
+                        # Intra-day Logic: Check High for SL, then Low for TP
+                        if high_price >= sl_limit:
+                            pnl = -risk_dollars 
+                        elif low_price <= tp_limit:
+                            pnl = reward_dollars 
                         else:
-                            # Close-to-close P&L (per share)
-                            pnl = -(exit_price - entry_price) # Negative of the price change
+                            pnl = -(close_price - entry_price)
 
-                    # Apply Position Sizing to the P&L
+                    # Scale PnL by shares and deduct commission
                     pnl *= share_count
-                    
-                    # DEDUCT BROKERAGE FEE (Commission for entry and exit)
-                    # We assume a two-sided commission (entry and exit)
                     brokerage_cost = BROKER_COMMISSION_PER_SHARE * share_count * 2
                     pnl -= brokerage_cost
             
-            # Update Equity for the next sizing calculation
             current_equity += pnl 
-            
-            # Update the Cumulative P&L Curve (for reporting)
             equity_curve.append(equity_curve[-1] + pnl)
         
         results[threshold] = equity_curve
