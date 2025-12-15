@@ -118,9 +118,9 @@ def train_and_test_ensemble(base_models, data, thresholds):
     raw_predictions_pct = meta_model.predict(test_X_meta)
 
     # --- POSITION SIZING CONSTANTS ---
-    STARTING_CAPITAL = 100000.0   # $100,000 Starting Portfolio Value
+    STARTING_CAPITAL = 10000.0   # $100,000 Starting Portfolio Value
     MAX_EQUITY_RISK_PCT = 0.01   # Max 1.0% of equity risked per trade
-    # --- NEW BROKERAGE CONSTANTS ---
+    # --- BROKERAGE CONSTANTS ---
     # The brokerage fee replaces the high Performance Fee for a more realistic transaction cost model.
     BROKER_COMMISSION_PER_SHARE = 0.002 # $0.002 per share (typical low-cost broker)
     # ---------------------------------
