@@ -18,7 +18,7 @@ model_trainers = {
 base_model_factories = {
     'prob': base.probdiff,
     'pricevol': base.pricevoldiff,
-    'priceangle': base.priceangle,
+    'wavelets': base.wavelets,
     'gauge': base.gauge
 }
 

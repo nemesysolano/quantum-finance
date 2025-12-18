@@ -3,7 +3,8 @@ import yfinance as yf
 import os
 import re
 
-from qf.market.augmentation import add_boundary_energy_levels, add_breaking_gap, add_cosine_and_sine_for_price_time_angles, add_directional_probabilities, add_fast_swing_ratio, add_fast_trend_run, add_last_opposite, add_price_volume_strength_oscillator, add_relative_volume, add_slow_swing_ratio, add_slow_trend_run, add_structural_direction
+from qf import context
+from qf.market.augmentation import add_boundary_energy_levels, add_breaking_gap, add_cosine_and_sine_for_price_time_angles, add_directional_probabilities, add_swing_ratio, add_price_volume_strength_oscillator, add_wavelets_differences
 base_meta_border = 0.80
 
 def read_csv(path):
@@ -22,10 +23,8 @@ def remove_timezone_from_json_dates(file_path):
     with open(file_path, 'w') as f:
         f.writelines(modified)
 
-def add_low_high_average(historical_data):
-    historical_data['Low_High_Avg'] = (historical_data['Low'] + historical_data['High']) / 2
 
-def import_market_data(symbol):    
+def import_market_data(symbol, lookback_periods = 14):    
     module_dir = os.path.dirname(__file__)
     data_dir = os.path.join(module_dir, 'data')
     output_path = os.path.join(data_dir, f"{symbol}.csv")
@@ -36,23 +35,17 @@ def import_market_data(symbol):
     if not os.path.exists(output_path):
         ticker = yf.Ticker(symbol)        
         historical_data = ticker.history(period="10y", interval="1d")  
-        add_low_high_average(historical_data)
         historical_data.to_csv(output_path)        
         
         historical_data = read_csv(output_path)
-        add_relative_volume(ticker, historical_data)
-        add_structural_direction(historical_data)
-        add_slow_trend_run(historical_data)
-        add_breaking_gap(historical_data)
-        add_fast_trend_run(historical_data)
-        add_fast_swing_ratio(historical_data)
-        add_last_opposite(historical_data)
-        add_slow_swing_ratio(historical_data)
+        add_breaking_gap(historical_data, 0.01)
+        add_swing_ratio(historical_data)
         add_directional_probabilities(historical_data)
         add_price_volume_strength_oscillator(historical_data, "High")
         add_price_volume_strength_oscillator(historical_data, "Close")
         add_price_volume_strength_oscillator(historical_data, "Low")       
         add_cosine_and_sine_for_price_time_angles(historical_data) 
+        add_wavelets_differences(historical_data)
         add_boundary_energy_levels(historical_data)
         historical_data.to_csv(output_path)
     else:

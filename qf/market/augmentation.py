@@ -6,279 +6,154 @@ from qf.quantum import  maximum_energy_level, minimum_energy_level
 from qf.stats import empirical_distribution
 from qf.quantum import quantum_lambda
 from qf.context import default_quantization_level
-def add_structural_direction(historical_data: pd.DataFrame) -> pd.DataFrame:
+
+
+def add_breaking_gap(data: pd.DataFrame, quantization_delta: float) -> pd.DataFrame:
     """
-    Adds the structural direction column (S_d) to the DataFrame.
+    Calculates the Breaking Gap (G(t)) based on Fast Trend structural violations.
+    
+    SIGN CONVENTION:
+    - Positive G (+): Resistance Breach (Upward Break).
+    - Negative G (-): Support Breach (Downward Break).
+    
+    Applies linear decay to the magnitude.
     """
-    df = historical_data
-    
-    # Vectorized comparison for efficiency
-    prev_high = df['High'].shift(1)
-    prev_low = df['Low'].shift(1)
-    
-    conditions = [
-        (df['High'] > prev_high) & (df['Low'] >= prev_low), # Ascending
-        (df['Low'] < prev_low) & (df['High'] <= prev_high)  # Descending
-    ]
-    choices = [1, -1]
-    
-    # default=np.nan implies 'Continuation' initially
-    df['Sd'] = np.select(conditions, choices, default=np.nan)
-    
-    # Fill NaNs with the previous valid value (Continuation logic)
-    df['Sd'] = df['Sd'].ffill().fillna(0)
-    
-    return df
+    G = pd.Series(0.0, index=data.index)
+    G_b = 0.0  # Last Structural Breach Value (Signed)
+    k = 0      # Bars elapsed
 
-def add_slow_trend_run(historical_data: pd.DataFrame) -> pd.DataFrame:
-    """
-    Calculates the Slow Trend Run (Rs).
-    Rs(t) = c(t) - c(t_s - 1)
-    """
-    # Avoid SettingWithCopy warnings
-    df = historical_data
-    close_prices = df['Close'].values
-    structural_directions = df['Sd'].values
-    num_rows = len(df)
-
-    slow_trend_run = np.full(num_rows, np.nan)
-    t_s = -1  # Start index of the slow trend
-
-    # Iterating from 1 because we need i-1
-    for i in range(1, num_rows):
-        sd_t = structural_directions[i]
-        sd_t_minus_1 = structural_directions[i-1]
-
-        # A new slow trend starts when the structural direction changes.
-        if sd_t != sd_t_minus_1:
-            t_s = i
-
-        # Calculate slow trend run if t_s is set validly
-        # We need t_s > 0 to safely access close_prices[t_s - 1]
-        if t_s > 0:
-            slow_trend_run[i] = close_prices[i] - close_prices[t_s - 1]
-
-    df['Rs'] = slow_trend_run
-    df.dropna(inplace=True)
-    return df
-
-def add_fast_trend_run(historical_data: pd.DataFrame) -> pd.DataFrame:
-    """
-    Calculates and adds the Fast Trend Run (Rf) to the DataFrame.
-    """
-    df = historical_data
-    close_prices = df['Close'].values
-    num_rows = len(df)
-    
-    fast_trend_run = np.full(num_rows, np.nan)
-    t_f = 0  # Start index of the fast trend
-
-    # Logic:
-    # If direction changes at index i (relative to i-1), the new run starts from i-1.
-    
-    if num_rows > 0:
-        fast_trend_run[0] = 0 # Initialize first element
-
-    for i in range(1, num_rows):
-        # We need at least 3 points to compare two deltas (i vs i-1, and i-1 vs i-2)
-        if i > 1:
-            delta_current = close_prices[i] - close_prices[i-1]
-            delta_prev = close_prices[i-1] - close_prices[i-2]
-            
-            # If signs differ, direction changed.
-            # Using np.sign ensures we catch + to - or - to +
-            if np.sign(delta_current) != np.sign(delta_prev):
-                t_f = i - 1
+    for t in range(3, len(data)):
+        current_time = data.index[t]
         
-        # Rf(t) = c(t) - c(t_f)
-        fast_trend_run[i] = close_prices[i] - close_prices[t_f]
-
-    df['Rf'] = fast_trend_run
-    df.dropna(inplace=True)
-    return df
-
-def add_breaking_gap(historical_data: pd.DataFrame, quantization_level: float = default_quantization_level) -> pd.DataFrame:
-    """
-    Calculates and adds the Breaking Gap (G) to the DataFrame.
-    Includes logic for linear decay based on the time elapsed since the last breach (k).
-    """
-    df = historical_data
-    index = df.index
-    num_rows = len(df)
-    gaps = np.zeros(num_rows)
-    
-    slow_trend_direction = df['Sd'].values
-    low = df['Low'].values
-    high = df['High'].values
-    
-    last_breach_val = 0.0 # G_b
-    k = 0 # Counter for decay bars
-
-    # Start at 2 because we look back at t-2
-    for idx in range(2, num_rows):
-        # t is current, t-1 is prev, t-2 is 2 bars ago
-        # Trend check uses t-1 (trend established before current bar)
-        trend_dir = slow_trend_direction[idx-1]
+        l_t, h_t = data['Low'].iloc[t], data['High'].iloc[t]
+        l_tm1, h_tm1 = data['Low'].iloc[t-1], data['High'].iloc[t-1]
+        l_tm2, h_tm2 = data['Low'].iloc[t-2], data['High'].iloc[t-2]
+        c_tm2, c_tm3 = data['Close'].iloc[t-2], data['Close'].iloc[t-3]
         
-        is_violation = False
-        current_gap = 0.0
+        new_breach = False
+        breach_val = 0.0
 
-        # Ascending trend violation (Break Low)
-        if trend_dir > 0 and low[idx] < low[idx-2]:
-            current_gap = low[idx-2] - low[idx]
-            is_violation = True
+        # Case 1: Support Breach (Ascending Trend Violation) -> NEGATIVE Sign
+        if (c_tm3 < c_tm2) and (l_t < l_tm2) and (l_tm2 < l_tm1):
+            new_breach = True
+            # Magnitude is (l_tm2 - l_t). We apply negative sign.
+            breach_val = -(l_tm2 - l_t)
 
-        # Descending trend violation (Break High)
-        elif trend_dir < 0 and high[idx] > high[idx-2]:
-            current_gap = high[idx] - high[idx-2]
-            is_violation = True
-
-        if is_violation:
-            gaps[idx] = current_gap
-            last_breach_val = current_gap # Set G_b
-            k = 1 # Reset counter (k=1 for first bar after breach, effectively)
+        # Case 2: Resistance Breach (Descending Trend Violation) -> POSITIVE Sign
+        elif (c_tm3 > c_tm2) and (h_t > h_tm2) and (h_tm2 > h_tm1):
+            new_breach = True
+            # Magnitude is (h_t - h_tm2). We apply positive sign.
+            breach_val = (h_t - h_tm2)
+        
+        # --- Update State ---
+        if new_breach:
+            G_b = breach_val
+            k = 0 
+            G.loc[current_time] = G_b
         else:
-            # Decay Logic: G(t) = max(G_b - k * Q, 0)
-            gaps[idx] = max(last_breach_val - (k * quantization_level), 0.0)
             k += 1
+            # Linear Decay on Magnitude, preserving Sign
+            magnitude = max(abs(G_b) - k * quantization_delta, 0.0)
+            # Restore sign
+            G.loc[current_time] = magnitude if G_b >= 0 else -magnitude
 
-    df['G'] = gaps    
-    return df
+    data['G'] = G
+    data.dropna(inplace=True)
+    return data
 
-def add_fast_swing_ratio(historical_data: pd.DataFrame) -> pd.DataFrame:
+def add_swing_ratio(historical_data: pd.DataFrame) -> pd.DataFrame:
     """
-    Calculates Fast Swing Ratio (Sf).
-    Sf(t) = min(2, (G(t) / |Rf(t)|)^2)
-    """
-    df = historical_data
-    breaking_gap = df['G']
-    fast_trend_run_abs = df['Rf'].abs()
-
-    # Vectorized calculation handling division by zero
-    ratio_squared = np.divide(
-        breaking_gap, 
-        fast_trend_run_abs, 
-        out=np.zeros_like(breaking_gap), 
-        where=fast_trend_run_abs!=0
-    ) ** 2
+    Calculates the Swing Ratio (S) based on the current decayed gap (G)
+    and the local price volatility (4-bar range).
     
-    df['Sf'] = np.minimum(2, ratio_squared)
-    # Note: We usually don't dropna here unless gaps/Rf generated NaNs
-    return df
-
-def add_last_opposite(historical_data: pd.DataFrame) -> pd.DataFrame:
-    """
-    Calculates the last opposite slow trend run (R*).
-    Optimized to O(N) complexity.
-    """
-    df = historical_data
-    rs = df['Rs'].values
-    num_rows = len(df)
-    rs_star = np.full(num_rows, np.nan)
-
-    last_positive_run = np.nan
-    last_negative_run = np.nan
-
-    for i in range(num_rows):
-        current_val = rs[i]
+    Formula:
+    R(t) = max(High[t...t-3]) - min(Low[t...t-3])
+    A(t) = max(|G(t)|, R(t))
+    S(t) = |G(t)| / A(t)
+    
+    Args:
+        historical_data (pd.DataFrame): DataFrame containing 'High', 'Low', and 'G' columns.
         
-        # If current run is Positive
-        if current_val > 0:
-            rs_star[i] = last_negative_run # The last opposite was negative
-            last_positive_run = current_val # Update last seen positive
-            
-        # If current run is Negative
-        elif current_val < 0:
-            rs_star[i] = last_positive_run # The last opposite was positive
-            last_negative_run = current_val # Update last seen negative
-            
-        # If current run is 0, we generally carry forward logic or do nothing
-        # depending on specific needs. Here we leave as nan or previous.
-        # Assuming 0 doesn't update "direction".
-        else:
-             # Fallback if needed, or leave NaN. 
-             # Logic usually implies strict >0 or <0 for trend runs.
-             pass
-
-    df['R*'] = rs_star
-    df.dropna(inplace=True)
-    return df
-
-def add_slow_swing_ratio(historical_data: pd.DataFrame) -> pd.DataFrame:
-    """
-    Calculates Slow Swing Ratio (Ss).
-    Ss(t) = min(2, (|Rs(t)| / |R*_s(t)|)^2)
+    Returns:
+        pd.DataFrame: Original DataFrame with 'S' column added.
     """
     df = historical_data
-    rs_abs = df['Rs'].abs()
-    rs_star_abs = df['R*'].abs()
-
-    # Vectorized calculation
-    ratio_squared = np.divide(
-        rs_abs, 
-        rs_star_abs, 
-        out=np.zeros_like(rs_abs), 
-        where=rs_star_abs!=0
-    ) ** 2
     
-    df['Ss'] = np.minimum(2, ratio_squared)
+    # Ensure 'G' (Breaking Gap) exists
+    if 'G' not in df.columns:
+        raise ValueError("The 'G' column (Breaking Gap) must be added before calculating Swing Ratio.")
+
+    # 1. Calculate Local Range (R) over a 4-bar window (t, t-1, t-2, t-3)
+    # Using rolling windows to find max high and min low
+    # The window=4 includes the current row and the 3 previous rows.
+    local_high = df['High'].rolling(window=4).max()
+    local_low = df['Low'].rolling(window=4).min()
+    R = local_high - local_low
+
+    # 2. Get the absolute magnitude of the current decayed gap
+    abs_G = df['G'].abs()
+
+    # 3. Calculate Absolute Reference (A) 
+    # A is the element-wise maximum of the gap magnitude and the local range
+    A = np.maximum(abs_G, R)
+
+    # 4. Compute Swing Ratio S(t)
+    # We use np.divide to handle cases where A might be zero (e.g., flat market with no gap)
+    # If A is 0, the result is 0 (Neutral pressure).
+    S = np.divide(
+        abs_G,
+        A,
+        out=np.zeros_like(abs_G),
+        where=A != 0
+    )
+
+    df['S'] = S
+    df['A'] = A
+    
+    # Drop NaNs created by the rolling window (first 3 rows will be NaN)
+    df.dropna(subset=['S'], inplace=True)
+    
     return df
-
-def add_directional_probabilities(historical_data):
+def add_directional_probabilities(df: pd.DataFrame) -> pd.DataFrame:
     """
-    Adds directional probabilities (P_up and P_down) to the DataFrame.
+    Calculates Directional Probabilities (P↑, P↓) based on:
+    1. The Swing Ratio (S(t))
+    2. The last structural breach type (G_b)
+    3. The price percentage change (r_p) using an exponential squashing function.
     """
-    df = historical_data
-    p_up = pd.Series(np.nan, index=df.index)
-    p_down = pd.Series(np.nan, index=df.index)
+    # 1. Calculate the percentage difference r_p(t) (referred to as Δ_%c(t) in README)
+    # Formula: 2 * (c(t) - c(t-1)) / (c(t) + c(t-1))
+    c_t = df['Close']
+    c_prev = df['Close'].shift(1)
+    rp = 2 * (c_t - c_prev) / (c_t + c_prev)
     
-    sf = df['Sf']
-    ss = df['Ss']
-    rf = df['Rf']
-    rs = df['Rs']
-
-    # Conditions
-    conflicting_fast_up_slow_down = (rf > 0) & (rs < 0)
-    conflicting_fast_down_slow_up = (rf < 0) & (rs > 0)
-    aligned_up = (rf > 0) & (rs > 0)
-    aligned_down = (rf < 0) & (rs < 0)
+    # Initialize probability columns
+    df['P↑'] = 0.5
+    df['P↓'] = 0.5
     
-    # --- Conflicting Trends ---
-    # Formula: P_reversal = Sf / (Sf + Ss) if Sf > 0 else 0.5
+    # We assume 'G' is a column identifying the breach:
+    # 'resistance' for Descending Trend Violation
+    # 'support' for Ascending Trend Violation
+    # We assume 'S' is the pre-calculated Swing Ratio column
     
-    sum_swings = sf + ss
-    conflicting_prob = pd.Series(0.5, index=df.index)
+    # Resistance Breach Case: Downward pressure
+    # P↓ = min(1, S(t) * exp(-rp(t)))
+    # P↑ = 1 - P↓
+    res_mask = df['G'] > 0
+    df.loc[res_mask, 'P↓'] = np.minimum(1.0, df.loc[res_mask, 'S'] * np.exp(-rp[res_mask]))
+    df.loc[res_mask, 'P↑'] = 1.0 - df.loc[res_mask, 'P↓']
     
-    # Calculate ratio where Sf > 0. Avoid division by zero if sum_swings is 0.
-    valid_mask = (sf > 0) & (sum_swings > 0)
-    conflicting_prob.loc[valid_mask] = sf.loc[valid_mask] / sum_swings.loc[valid_mask]
+    # Support Breach Case: Upward pressure
+    # P↑ = min(1, S(t) * exp(rp(t)))
+    # P↓ = 1 - P↑
+    sup_mask = df['G'] < 0
+    df.loc[sup_mask, 'P↑'] = np.minimum(1.0, df.loc[sup_mask, 'S'] * np.exp(rp[sup_mask]))
+    df.loc[sup_mask, 'P↓'] = 1.0 - df.loc[sup_mask, 'P↑']
     
-    # Fast Ascending vs Slow Descending -> P_down is the reversal probability
-    p_down.loc[conflicting_fast_up_slow_down] = conflicting_prob.loc[conflicting_fast_up_slow_down]
+    # Handle the probability difference used in baseline models: Pd = P↑ - P↓
+    df['Pd'] = df['P↑'] - df['P↓']
     
-    # Fast Descending vs Slow Ascending -> P_up is the reversal probability
-    p_up.loc[conflicting_fast_down_slow_up] = conflicting_prob.loc[conflicting_fast_down_slow_up]
-
-    # --- Aligned Trends ---
-    # Formula: P_continuation = min(1, Ss/4 + Sf)
-    
-    aligned_prob = np.minimum(1, (ss / 4) + sf)
-    
-    # Both Ascending -> P_up is continuation
-    p_up.loc[aligned_up] = aligned_prob.loc[aligned_up]
-    
-    # Both Descending -> P_down is continuation
-    p_down.loc[aligned_down] = aligned_prob.loc[aligned_down]
-    
-    # --- Complementary Probabilities ---
-    df['P↑'] = p_up.fillna(1 - p_down)
-    df['P↓'] = p_down.fillna(1 - p_up)
-    
-    historical_data.dropna(inplace=True)
     return df
-
-import numpy as np
-import pandas as pd
 
 def add_price_volume_strength_oscillator(historical_data: pd.DataFrame, price: str) -> pd.DataFrame:
     """
@@ -334,13 +209,6 @@ def add_price_volume_strength_oscillator(historical_data: pd.DataFrame, price: s
     
     return df
 
-def add_relative_volume(ticker, historical_data):
-    market_cap = ticker.info.get('marketCap')
-    if not market_cap is None:
-        historical_data['RV'] = historical_data['Volume'] / (market_cap / historical_data['Close'])    
-    else:
-        historical_data['RV'] = np.zeros_like(historical_data['Volume'])
-        historical_data.dropna(inplace=True)        
 
 def add_closest_higher_high(historical_data):
     highs = historical_data['High']
@@ -548,4 +416,36 @@ def add_boundary_energy_levels(historical_data: pd.DataFrame, quantization_level
     historical_data['E_High'] = upper_boundaries(historical_data['High'])
     historical_data.dropna(inplace=True)
 
+def add_wavelets(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Calculates the Wavelet W(t) based on README definitions.
     
+    W(t) = Δ%c(t-1) * S(t-1) * sum(cos(θ) + sin(θ))
+    """
+    # 1. Calculate Signed Momentum: Δ%c(t)
+    c = df['Close']
+    rp = 2 * (c - c.shift(1)) / (c + c.shift(1)) #
+    
+    # 2. Sum the Geometric Components (Trig Sum)
+    trig_sum = 0
+    for i in range(1, 5):
+        trig_sum += df[f'cos_θ{i}'] + df[f'sin_θ{i}'] #
+        
+    # 3. Compute W(t) using lagged values (t-1)
+    # rp.shift(1) is the only component that dictates the initial sign.
+    df['W'] = rp.shift(1) * df['S'].shift(1) * trig_sum.shift(1) #
+    
+    df.dropna(subset=['W'], inplace=True)
+    return df
+
+def add_wavelets_differences(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Calculates the Wavelet Difference Wd(t) = W(t) - W(t-1).
+    This is the target for the Wavelet Difference Forecast model.
+    """
+    if 'W' not in df.columns:
+        df = add_wavelets(df)
+        
+    df['Wd'] = df['W'] - df['W'].shift(1) #
+    df.dropna(subset=['Wd'], inplace=True)
+    return df

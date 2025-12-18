@@ -3,6 +3,6 @@ from .models import base
 base_model_factories = {
     'prob': base.probdiff,
     'pricevol': base.pricevoldiff,
-    'priceangle': base.priceangle,
+    'wavelets': base.wavelets,
     'gauge': base.gauge
 }

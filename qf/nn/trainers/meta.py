@@ -8,7 +8,7 @@ import qf.market as mkt
 import matplotlib.pyplot as plt
 import qf.nn.models.base.pricevoldiff as pv_lib
 import qf.nn.models.base.probdiff as pd_lib
-import qf.nn.models.base.priceangle as ang_lib
+import qf.nn.models.base.wavelets as ang_lib
 import qf.nn.models.base.gauge as gauge_lib
 from qf.nn.trainers.base import base_trainer
 from types import SimpleNamespace
@@ -22,7 +22,7 @@ ANNUAL_RISK_FREE_RATE = 0.04
 # --- REMOVED ALL FEES AND TAXES (Gross PNL only) ---
 # ------------------------------------------
 
-base_model_names = ('pricevol', 'priceangle', 'gauge')
+base_model_names = ('pricevol', 'wavelets', 'gauge')
 
 def extract_meta_features(historical_data, models, k=14):
     """
