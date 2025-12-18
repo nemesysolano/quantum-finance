@@ -35,49 +35,57 @@ def create_model(k, l2_rate, dropout_rate):
     
     model.compile(
         optimizer='adam',
-        loss='mae',
+        loss='mse',
         metrics=['mae']
     )
     return model
 
-def create_inputs(historical_data: pd.DataFrame, k):
+def calculate_gauge_series(historical_data: pd.DataFrame) -> pd.Series:
+    """
+    Helper to calculate the Schrödinger Gauge Ö(t) based on README definitions.
+    """
+    # Assuming E_Low (E^n1) and E_High (E^n2) are pre-calculated in the dataframe
+    # as per the 'Schrödinger Gauge' section of the README.
     E_Low = historical_data['E_Low']
     E_High = historical_data['E_High']
     close = historical_data['Close']
-    # Calculate the distance ratio as the symmetric percentage difference
-    # between the distance to the high energy level and the distance to the low energy level.
-    numerator = E_High - close
-    denominator = close - E_Low
-    distance_ratio = 2 * (numerator - denominator) / (numerator + denominator + 1e-9)
-    historical_data['Ö'] = distance_ratio
     
-    # Create the lookback features [Ö(t-1), Ö(t-2), ..., Ö(t-k)] for each time t.
+    # Formula: Ö(t) = 2 * (Ö↑ - Ö↓) / (Ö↑ + Ö↓)
+    # where Ö↑ = E_High - close and Ö↓ = close - E_Low
+    numerator = (E_High - close) - (close - E_Low)
+    denominator = (E_High - close) + (close - E_Low)
+    
+    return 2 * numerator / (denominator + 1e-9)
+
+def create_inputs(historical_data: pd.DataFrame, k: int) -> pd.DataFrame:
+    """
+    Forecasts Schrödinger Gauge Difference Ö_d(t) from last k differences.
+    Input Features: [Ö_d(t-1), Ö_d(t-2), ..., Ö_d(t-k)]
+    """
+    # 1. Calculate the absolute gauge
+    gauge = calculate_gauge_series(historical_data)
+    
+    # 2. Calculate the Gauge Difference: Ö_d(t) = Ö(t) - Ö(t-1)
+    gauge_diff = gauge.diff().rename('Ö')
+    
+    # 3. Create the lookback features for the difference
     features = []
     for i in range(1, k + 1):
-        features.append(historical_data['Ö'].shift(i))
+        features.append(gauge_diff.shift(i).rename(f'Ö_d{i}'))
     
-    # Concatenate the shifted series into a DataFrame and drop rows with NaNs.
+    # 4. Concatenate and drop NaNs (k lags + 1 for the initial diff)
     input_df = pd.concat(features, axis=1).dropna()
     return input_df
 
-def create_targets(historical_data, k):
+def create_targets(historical_data: pd.DataFrame, k: int) -> pd.Series:
     """
-    Create the target values, which are the Schrödinger Gauge values Ö(t).
-    This function ensures the targets Y(t) are aligned with the input features 
-    X(t) = [Ö(t-1), Ö(t-2), ..., Ö(t-k)].
+    Prediction Target: Schrödinger Gauge Difference Ö_d(t) at time t.
+    Aligned with the inputs from create_inputs.
     """
-    # Calculate the Schrödinger Gauge Ö(t) as the target.
-    E_Low = historical_data['E_Low']
-    E_High = historical_data['E_High']
-    close = historical_data['Close']
-    numerator = E_High - close
-    denominator = close - E_Low
-    distance_ratio = 2 * (numerator - denominator) / (numerator + denominator + 1e-9)
-    historical_data['Ö'] = distance_ratio
-
-    # The create_inputs function drops the first `k` rows because of the lookback window.
-    # To align the targets, we must also discard the first `k` values of the Ö series.
-    # This ensures that the first input sample (features from t=0 to t=k-1) corresponds 
-    # to the first target (at t=k).
-    aligned_targets = historical_data['Ö'][k:]
-    return aligned_targets.values
+    # 1. Calculate the absolute gauge and its difference
+    gauge = calculate_gauge_series(historical_data)
+    gauge_diff = gauge.diff().rename('Od')
+    
+    # 2. Align with create_inputs by dropping the same initial rows
+    # We drop k + 1 rows: k for the lookback and 1 for the diff() operation
+    return gauge_diff.iloc[k+1:]

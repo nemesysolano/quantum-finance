@@ -62,8 +62,8 @@ def base_trainer(args):
     mse, mae = best_model.evaluate(X_test_scaled, Y_test, verbose=0) 
     
     Y_pred_raw = best_model.predict(X_test_scaled).flatten()
-    Y_pred = np.int32(np.sign(Y_pred_raw)) 
-    Y_expected = np.int32(np.sign(Y_test.flatten()))
+    Y_pred = np.int32(np.sign(Y_pred_raw)).flatten()
+    Y_expected = np.int32(np.sign(Y_test)).flatten()
 
     matching  = Y_pred == Y_expected
     different = Y_pred != Y_expected

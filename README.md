@@ -295,21 +295,23 @@ The **Schrödinger Gauge** $Ö(t)$ acts as a quantum-aware volatility and moment
 
 ## Quantum Forecast Models ##
 
-### Schrödinger Gauge Forecast ###
+### Schrödinger Gauge Difference Forecast ###
 
-This model forecasts schrödinger gauge $Ö(t)$ at time $t$
+This model forecasts schrödinger gauge difference $Ö_d(τ)$ at time $τ$.
 
-#### Prediction Target ####
+##### Prediction Target #####
 
-Schrödinger gauge $Ö(t)$ at time $t$
+Schrödinger gauge $Ö_d(τ)$ at time $τ$.
 
-#### Input Features ####
+##### Input Features #####
 
-Last $k$ actual schrödinger gauge values.
+Last $k$ schrödinger gauge differences.
 
 | $t-1$ | $t-2$ | ... | $t-k$ |
 | :--- | :--- | :--- | :--- |
-| $Ö(t-1)$ | $Ö(t-2)$ | ... | $Ö(t-k)$ |
+| $Ö_d(t-1)$ | $Ö_d(t-2)$ | ... | $Ö_d(t-k)$ |
+
+where $Ö_d(τ) = Ö(τ) - Ö(τ-1)$
 
 ## The Meta Model ##
 
