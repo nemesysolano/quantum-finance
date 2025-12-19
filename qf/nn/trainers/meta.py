@@ -9,31 +9,34 @@ import qf.nn.models.base.pricevoldiff as pv_lib
 import qf.nn.models.base.probdiff as pd_lib
 import qf.nn.models.base.wavelets as wav_lib
 import qf.nn.models.base.gauge as gauge_lib
+import qf.nn.models.base.barinbalance as bar_lib
 
 # --- CONSTANTS ---
 BASE_CASH = 10000
 TRADING_DAYS_PER_YEAR = 252
 ANNUAL_RISK_FREE_RATE = 0.04 
 
-base_model_names = ('pricevol', 'wavelets', 'gauge', 'probdiff')
+base_model_names = ('pricevol', 'wavelets', 'gauge', 'probdiff', 'barinbalance')
 
 def extract_meta_features(historical_data, models, k=14):
     """Stacks predictions from all base models as features."""
-    m_pv, m_ang, m_g, m_pd = models
+    m_pv, m_ang, m_g, m_pd, m_bar = models
     X_pv = pv_lib.create_inputs(historical_data, k)
     X_wav = wav_lib.create_inputs(historical_data, k) 
     X_g = gauge_lib.create_inputs(historical_data, k)
     X_pd = pd_lib.create_inputs(historical_data, k)
-    
+    X_bar = bar_lib.create_inputs(historical_data, k)
+
     min_samples = min(len(X_pv), len(X_wav), len(X_g))
-    X_pv, X_wav, X_g, X_pd = X_pv[-min_samples:], X_wav[-min_samples:], X_g[-min_samples:], X_pd[-min_samples:]
+    X_pv, X_wav, X_g, X_pd, X_bar = X_pv[-min_samples:], X_wav[-min_samples:], X_g[-min_samples:], X_pd[-min_samples:], X_bar[-min_samples:]
     
     y_pv = m_pv.predict(X_pv, verbose=0).flatten()
     y_wav = m_ang.predict(X_wav, verbose=0).flatten()
     y_g = m_g.predict(X_g, verbose=0).flatten()
     y_pd = m_pd.predict(X_pd, verbose=0).flatten()
-    
-    return np.column_stack([y_pv, y_wav, y_g, y_pd])
+    y_bar = m_bar.predict(X_bar, verbose=0).flatten()
+
+    return np.column_stack([y_pv, y_wav, y_g, y_pd, y_bar])
 
 def get_limits(close_t, energy_levels, direction, risk_pct=0.01):    
     risk_dollars, reward_dollars = 0, 0
@@ -46,34 +49,28 @@ def get_limits(close_t, energy_levels, direction, risk_pct=0.01):
             risk_dollars = e_high - close_t
             reward_dollars = close_t - e_low
     
-    # Cap risk at 1% of price and ensure a 3:1 reward/risk ratio
     risk_dollars = min(risk_dollars, close_t * risk_pct)
     reward_dollars = max(risk_dollars * 3, reward_dollars)
     return risk_dollars, reward_dollars
 
 def train_and_test_ensemble(base_models, data, thresholds, meta_config):
     """
-    Adaptive Meta Model.
-    Now configurable via meta_config to support V2, V3, and future iterations.
+    Adaptive Meta Model (V3 Production).
+    Configurable via meta_config to manage non-normal distribution risks.
     """
-    # 1. Dataset Splitting
     _, _, _, meta_train_data, test_data = mkt.create_datasets(data)
 
-    # 2. INITIAL WARM-UP (Baseline Learning)
+    # 1. Warm-up using SGD with configurable learning rate
     meta_X_train = extract_meta_features(meta_train_data, base_models)
-    # Align prices with features (diff reduces length by 1)
     meta_prices = meta_train_data['Close'].values[-len(meta_X_train)-1:]
     meta_y_train = np.diff(meta_prices) / meta_prices[:-1] 
 
-    # Initialize SGD for Online Walk-Forward Learning
     meta_model = SGDRegressor(learning_rate='constant', eta0=meta_config.get('learning_rate_init', 0.01))
     meta_model.partial_fit(meta_X_train, meta_y_train)
 
-    # 3. PREPARE EXECUTION DATA
     test_X_all = extract_meta_features(test_data, base_models)
     execution_length = len(test_X_all) - 1
     
-    # Slice arrays to match execution window (t to t+1)
     t_open = test_data['Open'].values[-execution_length:]
     t_close = test_data['Close'].values[-execution_length:]
     t_high = test_data['High'].values[-execution_length:]
@@ -84,66 +81,47 @@ def train_and_test_ensemble(base_models, data, thresholds, meta_config):
     results = {t: [BASE_CASH] for t in thresholds}
     cur_eq = {t: BASE_CASH for t in thresholds}
 
-    # 4. WALK-FORWARD EXECUTION LOOP
     for i in range(execution_length):
         x_today = test_X_all[i].reshape(1, -1)
-        
-        # Calculate Local Volatility for Adaptive Update
         recent_window = t_close[max(0, i-10):i]
+        # Measure local heteroscedasticity
         vol = np.std(np.diff(recent_window)/recent_window[:-1]) if len(recent_window) > 2 else 0.01
         
-        # Meta-Model Prediction
         pred_pct = meta_model.predict(x_today)[0]
-        
-        # Use conviction threshold from config (e.g., V3 = 0.50, V2 = 0.75)
-        conviction = np.abs(np.sum(np.sign(x_today))) / 4.0
+
+        # Calculate ensemble conviction
+        conviction = np.abs(np.sum(np.sign(x_today))) / 5
 
         for threshold in thresholds:
             pnl = 0
-            
-            # Entry Logic: Strength + Configurable Conviction
+            # V3 Consensus Logic
             if abs(pred_pct) > threshold and conviction >= meta_config['conviction_threshold']:
                 direction = 1 if pred_pct > 0 else -1
+                risk_ps, reward_ps = get_limits(t_open[i], (t_EL[i], t_EH[i]), direction)
                 
-                # Get Schrödinger Energy Level Limits
-                risk_ps, reward_ps = get_limits(
-                    t_open[i], 
-                    (t_EL[i], t_EH[i]), 
-                    direction
-                )
-                
-                # Use structural risk circuit breaker from config (e.g., V3 = 0.035)
+                # V3 Fat-Tail Circuit Breaker
                 if risk_ps > 0 and (risk_ps / t_open[i]) < meta_config['risk_circuit_breaker']:
-                    # Position Sizing: 1% Equity Risk per trade
                     share_count = min(
                         np.floor((cur_eq[threshold] * 0.01) / risk_ps), 
                         np.floor(cur_eq[threshold] / t_open[i])
                     )
                     
                     if share_count >= 1:
-                        # Intraday Execution with SL/TP
-                        if direction == 1:  # LONG
-                            if t_low[i] <= (t_open[i] - risk_ps):
-                                pnl_ps = -risk_ps # Stop Loss hit
-                            elif t_high[i] >= (t_open[i] + reward_ps):
-                                pnl_ps = reward_ps # Take Profit hit
-                            else:
-                                pnl_ps = t_close[i] - t_open[i] # EOD Exit
-                        else:  # SHORT
-                            if t_high[i] >= (t_open[i] + risk_ps):
-                                pnl_ps = -risk_ps # Stop Loss hit
-                            elif t_low[i] <= (t_open[i] - reward_ps):
-                                pnl_ps = reward_ps # Take Profit hit
-                            else:
-                                pnl_ps = t_open[i] - t_close[i] # EOD Exit
+                        if direction == 1:
+                            if t_low[i] <= (t_open[i] - risk_ps): pnl_ps = -risk_ps
+                            elif t_high[i] >= (t_open[i] + reward_ps): pnl_ps = reward_ps
+                            else: pnl_ps = t_close[i] - t_open[i]
+                        else:
+                            if t_high[i] >= (t_open[i] + risk_ps): pnl_ps = -risk_ps
+                            elif t_low[i] <= (t_open[i] - reward_ps): pnl_ps = reward_ps
+                            else: pnl_ps = t_open[i] - t_close[i]
                         
                         pnl = pnl_ps * share_count
             
             cur_eq[threshold] += pnl
             results[threshold].append(cur_eq[threshold])
 
-        # 5. ONLINE LEARNING STEP
-        # Use volatility dampening from config (e.g., V3 = 50, V2 = 100)
+        # Online adaptive update adjusted for volatility clustering
         meta_model.eta0 = meta_config.get('learning_rate_init', 0.01) / (1.0 + vol * meta_config['volatility_dampening'])
         actual_day_return = (t_close[i] - t_open[i]) / t_open[i]
         meta_model.partial_fit(x_today, [actual_day_return])
@@ -243,22 +221,25 @@ def best_threshold(results):
     best_stats['Best Threshold'] = best_thresh
 
     return best_history, best_stats
+
 def meta_trainer_run(ticker):
+    v3_config = {
+        'conviction_threshold': 0.60,  # 2/4 models agreement
+        'risk_circuit_breaker': 0.035, # 3.5% structural risk limit
+        'volatility_dampening': 50,    # Adaptive learning speed
+        'learning_rate_init': 0.01     # Base SGD step size
+    }
+
     data = mkt.import_market_data(ticker)        
-    
     base_models = load_base_models(ticker)
     magnitude_thresholds = [5e-5, 0.001, 0.003, 0.005, 0.010, 0.015, 0.020, 0.030]
-    meta_config = {
-        'conviction_threshold': 0.50, # Agreement of 2/4 models
-        'risk_circuit_breaker': 0.035, # Max 3.5% distance to stop
-        'volatility_dampening': 50,    # Speed of adaptive learning
-        'base_threshold': 5e-5         # Minimum prediction magnitude
-    }
     
-    test_data, backtest_results, meta_model = train_and_test_ensemble(base_models, data, magnitude_thresholds, meta_config)
+    # Executing with V3 Production Config
+    test_data, backtest_results, meta_model = train_and_test_ensemble(
+        base_models, data, magnitude_thresholds, v3_config
+    )
     
     best_hist, best_stats = best_threshold(backtest_results)
-
     return best_hist, test_data, best_stats, meta_model
 
 def meta_trainer(args):

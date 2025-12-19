@@ -5,7 +5,7 @@ regularizers = keras.regularizers
 import numpy as np
 import pandas as pd
 
-def create_model(k, l2_rate, dropout_rate):
+def create_model(k, l2_rate,  dropout_rate):
     """
     Creates the baseline DNN model for REGRESSION of the Price-Volume Difference (Y_d).
 
@@ -24,7 +24,7 @@ def create_model(k, l2_rate, dropout_rate):
         # --- Hidden Layer 1 ---
         layers.Dense(64, kernel_regularizer=l2_reg, input_shape=input_shape),
         layers.BatchNormalization(), 
-        layers.Activation('relu'),
+        layers.Activation('tanh'),
         layers.Dropout(dropout_rate), 
         
         # --- Output Layer ---

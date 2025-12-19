@@ -4,5 +4,7 @@ base_model_factories = {
     'probdiff': base.probdiff,
     'pricevol': base.pricevoldiff,
     'wavelets': base.wavelets,
-    'gauge': base.gauge
+    'gauge': base.gauge,
+    'barinbalance': base.barinbalance
+
 }

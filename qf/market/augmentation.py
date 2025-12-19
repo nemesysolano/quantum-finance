@@ -449,3 +449,79 @@ def add_wavelets_differences(df: pd.DataFrame) -> pd.DataFrame:
     df['Wd'] = df['W'] - df['W'].shift(1) #
     df.dropna(subset=['Wd'], inplace=True)
     return df
+
+import pandas as pd
+import numpy as np
+
+def add_bar_inbalance(df: pd.DataFrame, lookback_periods) -> pd.DataFrame:
+    """
+    Calculates the Balance Rule b(t) and Time Imbalance Θ(t).
+    
+    b(t) = b(t-1) if Δp(t) = 0 else Δp(t)/|Δp(t)|
+    Θ(t) = average of last k balance rules
+    """
+    prices = df['Close']
+    delta_p = prices.diff()
+    k = lookback_periods
+
+    # Initialize b(t) sequence
+    b = np.zeros(len(prices))
+    b[0] = np.sign(prices.iloc[0]) # b(0) is sign(p(0))
+    
+    for t in range(1, len(prices)):
+        if delta_p.iloc[t] == 0:
+            b[t] = b[t-1]
+        else:
+            b[t] = delta_p.iloc[t] / abs(delta_p.iloc[t])
+            
+    df['b'] = b
+    # Θ(t) = (Sum of b from t-1 to t-k) / k
+    # We use shift(1) to ensure the imbalance at time t uses data until t-1
+    df['Θ'] = df['b'].shift(1).rolling(window=k).mean()
+    df.dropna(inplace=True)    
+    return df
+
+def add_bar_inbalance_ratio(df: pd.DataFrame, lookback_periods) -> pd.DataFrame:
+    """
+    Calculates the Bar Inbalance Ratio Θr(t).
+    
+    Θr(t) = b(t-1) / Θ(t-1)
+    """
+    # Ensure dependencies exist
+    if 'b' not in df.columns or 'Theta' not in df.columns:
+        df = add_bar_inbalance(df, lookback_periods)
+        
+    df['Θr'] = df['b'].shift(1) / df['Θ'].shift(1)
+    return df
+
+def add_bar_inbalance_difference(df: pd.DataFrame, lookback_periods) -> pd.DataFrame:
+    """
+    Calculates the Bar Inbalance Difference Θd(t).
+    
+    Θd(t) = 2 * (Θ(t-1) - Θ(t-2)) / (Θ(t-1) + Θ(t-2))
+    """
+    if 'Θ' not in df.columns:
+        df = add_bar_inbalance(df, lookback_periods)
+        
+    t_m1 = df['Θ'].shift(1)
+    t_m2 = df['Θ'].shift(2)
+    
+    df['Θd'] = 2 * (t_m1 - t_m2) / (t_m1 + t_m2)
+    return df
+
+def add_inbalance_aggression_filter(df: pd.DataFrame, lookback_periods) -> pd.DataFrame:
+    epsilon = 1e-5
+    """
+    Calculates the combined Inbalance Aggression Filter Θ+(t).
+    
+    Θ+(t) = Θr(t) * Θd(t)
+    """
+    if 'Θr' not in df.columns:
+        df = add_bar_inbalance_ratio(df, lookback_periods)
+    if 'Θd' not in df.columns:
+        df = add_bar_inbalance_difference(df, lookback_periods)
+        
+    df['Θ+'] = df['Θr'] * df['Θd']
+    df.loc[df['Θ+'].abs() <= epsilon, 'Θ+'] = np.int(0)
+    df.dropna(inplace=True)
+    return df

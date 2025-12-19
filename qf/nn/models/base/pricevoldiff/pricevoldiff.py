@@ -42,7 +42,7 @@ def create_model(k: int, l2_rate: float, dropout_rate: float):
         # --- Output Layer ---
         # The target Y_d(t) is a signed value with no known strict bounds, 
         # so a linear activation (default) is used for regression.
-        layers.Dense(1, activation='linear')
+        layers.Dense(1, activation='tanh')
     ])
     
     # Compile the model

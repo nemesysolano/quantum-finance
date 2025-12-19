@@ -26,7 +26,7 @@ def create_model(k: int, l2_rate= 1e-4, dropout_rate = 0.01):
         
         # --- Output Layer ---
         # The target is a percentage change, so a linear activation is used.
-        layers.Dense(1, activation='relu')
+        layers.Dense(1, activation='tanh')
     ])
     
     # Standard regression compile using Mean Squared Error as the loss function

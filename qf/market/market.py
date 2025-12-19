@@ -4,7 +4,7 @@ import os
 import re
 
 from qf import context
-from qf.market.augmentation import add_boundary_energy_levels, add_breaking_gap, add_cosine_and_sine_for_price_time_angles, add_directional_probabilities, add_swing_ratio, add_price_volume_strength_oscillator, add_wavelets_differences
+from qf.market.augmentation import add_boundary_energy_levels, add_breaking_gap, add_cosine_and_sine_for_price_time_angles, add_directional_probabilities, add_swing_ratio, add_price_volume_strength_oscillator, add_inbalance_aggression_filter, add_wavelets_differences
 base_meta_border = 0.80
 
 def read_csv(path):
@@ -47,6 +47,7 @@ def import_market_data(symbol, lookback_periods = 14):
         add_cosine_and_sine_for_price_time_angles(historical_data) 
         add_wavelets_differences(historical_data)
         add_boundary_energy_levels(historical_data)
+        add_inbalance_aggression_filter(historical_data, lookback_periods)
         historical_data.to_csv(output_path)
     else:
         historical_data = read_csv(output_path)

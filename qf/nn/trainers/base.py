@@ -7,12 +7,12 @@ from qf.stats.distributions import empirical_distribution
 import qf.nn as nn
 import tensorflow as tf
 import os
-from qf.nn.models.base import wavelets, pricevoldiff, probdiff, gauge
+from qf.nn.models.base import wavelets, pricevoldiff, probdiff, gauge, barinbalance
 from sklearn.linear_model import LinearRegression
 layers = tf.keras.layers
 regularizers = tf.keras.regularizers
 
-base_model_names = ('prob', 'pricevol', 'wavelets', 'gauge')
+base_model_names = ('prob', 'pricevol', 'wavelets', 'gauge', 'barinbalance')
 # -- base trainer module
 def base_trainer(args):
     ticker = args.ticker.upper()

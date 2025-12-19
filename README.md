@@ -1,5 +1,30 @@
 # Quantum Trading with Gaps #
 
+## Utility Functions ##
+
+Formulas and processes described in this section will be used all over the place when describing model features and targets.
+
+### Bounded Percentage Difference ###
+
+Let $a$ and $b$ real numbers and either of them is non-zero
+
+$Δ_\%(a, b) = \frac{b-a}{|a| + |b|}$
+
+### Serial Difference ###
+
+Consider two elements $x(t)$ and $x(t-k)$ from a time series $x$ where $t$ is the time index. The **serial difference** $Δ(x(t), k)$ from $t$ backwards to $t-k$ is
+
+$Δ(x(t), k) = Δ_\%(x(t-k), x(t))$ where $k$ is a non-negative integer.
+
+### Squared Serial Difference ###
+
+$Δ^2(x(t), k) = [Δ(x(t), k)]^2$
+
+---
+
+if $k = 1$ we can rewrite serial difference and squared serial difference as $Δ(x(t))$ and $Δ^2(x(t))$ respectively.
+
+
 ## The Breaking Gap ##
 
 Suppose that a new bar ${(o(t), h(t), l(t), c(t))}$ comes along; we define the **breaking gap** ${G(t)}$ as the distance between the violated structural level and the extreme price that violated it. This is valuable for determining the age and total magnitude of the structural level being tested.
@@ -30,8 +55,8 @@ Given that context, the swing ratio at time $S(t)$ is defined as:
 
 $S(t) = \frac {|G(t)|}{A(t)}$, where 
 
-* $A(t) = \max (|G(t)|, R(t))$ is the **absolute reference**
-* $R(t) = \max_{i \in \{0, 1, 2, 3\}} \{h_{t-i}\} - \min_{i \in \{0, 1, 2, 3\}} \{l_{t-i}\}$ is the **local range**.
+* $A(t) = \max \{|G(t)|, R(t)\}$ is the **absolute reference**
+* $R(t) = \max_{i \in 0...3 } \{h_{t-i}\} - \min_{i \in 0...3 } \{l_{t-i}\}$ is the **local range**.
 
 
 ## Directional Probabilities ##
@@ -42,35 +67,28 @@ The mapping of S(t) to these probabilities depends on whether the last structura
 
 ### Resistance Breach Case (Descending Trend Violation) ### 
 
-We define percentual difference between p(t) and p(t-1) as $Δ_\%p(t)$:
-
-$Δ_\%p(t) = 2 \frac{p(t)-p(t-1)}{p(t) + p(t-1)}$
-
 If the last structural breach G_b was a **resistance breach**, the current gap exerts downward pressure:
 
-* $P_↓(t) = \min(1, S(t) \mathbf e^{Δ_\%c(t)})$
+* $P_↓(t) = \min\{1, S(t)⋅Δ^2c(t)\}$
 * $P_↑(t) = 1 - S(t)$
 
 ### Support Breach Case (Ascending Trend Violation) ###
 If the last structural breach G_b was a **support breach**, the current gap exerts upward pressure:
 
-* $P_↑(t) = \min(1,S(t) \mathbf e^{Δ_\%c(t)})$
+* $P_↑(t) = \min\{1, S(t)⋅Δ^2(t)\}$
 * $P_↓(t) = 1 - S(t)$
 
 
 ## Price-Volume Oscillator ##
 
-We define ${Y(t)}$ as the **price-volume** oscillator:
+We define ${Y(t)}$ as the **price-volume** oscillator which is the product of price percentage difference and the squared volume percentage difference:
 
-$Y(t) =  2 \frac {p(t)-p(t-1)}{p(t)+p(t-1)} \frac {v(t)}{v(t-1)}$, where
+$Y(t) = Δp(t)⋅Δ^2v(t)$, where
 
 - ${p(t)}$ price at time ${t}$
 - ${p(t-1)}$ price at time ${t-1}$
 - ${v(t)}$ traded volume at time ${t}$
 - ${v(t-1)}$ traded volume at time ${t-1}$
-
-This oscillator detects strong bullish (${Y(t) \rarr +\infty}$) or bearish (${Y(t) \rarr -\infty}$) behavior. Moreover, ${p(t)}$ represents ${h(t)}$ (high price in OHLC bar) when
-analysing resistance/bearish momentum, ${l(t)}$ (low price in OHLC bar) when analysing support/bullish momentum or ${c(t)}$ close price when analysing trends.
 
 ## The Price-Time Angles ##
 
@@ -96,25 +114,25 @@ To ensure the geometry remains stable and free from the "zero-degree" or "90-deg
 
 #### 1. Time Lookback Base $B(t)$
 This factor represents the maximum temporal distance to any of the four structural pivots, ensuring all time-ratios are bounded in $[0, 1]$.
-${B(t) = \max(i_{h↑}, \space i_{h↓}, \space i_{l↑}, \space i_{l↓})}$
+$B(t) = \max\{i_{h↑}, \space i_{h↓}, \space i_{l↑}, \space i_{l↓}\}$
 
 #### 2. Normalized Time Vector $b(t)$
 The relative temporal proximity of each structural point.
-${b(t) = \left\{\frac{i_{h↑}}{B(t)}, \space \frac{i_{h↓}}{B(t)}, \space \frac{i_{l↑}}{B(t)}, \space \frac{i_{l↓}}{B(t)}\right\}}$
+$b(t) = \left\{\frac{i_{h↑}}{B(t)}, \space \frac{i_{h↓}}{B(t)}, \space \frac{i_{l↑}}{B(t)}, \space \frac{i_{l↓}}{B(t)}\right\}$
 
 #### 3. Price Range Base $C(t)$
 This factor represents the maximum price distance to the structural levels, ensuring all price-ratios are bounded in $[0, 1]$.
-${C(t) = \max(h_↑(t)-h(t), \space h(t)-h_↓(t), \space l_↑(t)-l(t), \space l(t)-l_↓(t))}$
+$C(t) = \max\{h_↑(t)-h(t), \space h(t)-h_↓(t), \space l_↑(t)-l(t), \space l(t)-l_↓(t)\}$
 
 #### 4. Normalized Price Vector $c(t)$
 The relative price proximity to each structural point.
-${c(t) = \left\{\frac{h_↑(t)-h(t)}{C(t)}, \space \frac{h(t)-h_↓(t)}{C(t)}, \space \frac{l_↑(t)-l(t)}{C(t)}, \space \frac{l(t)-l_↓(t)}{C(t)}\right\}}$
+$c(t) = \left\{\frac{h_↑(t)-h(t)}{C(t)}, \space \frac{h(t)-h_↓(t)}{C(t)}, \space \frac{l_↑(t)-l(t)}{C(t)}, \space \frac{l(t)-l_↓(t)}{C(t)}\right\}$
 
 ----
 
 By dividing the normalized time component by the normalized price component, we derive the four **Price-Time Angles** that govern the structural geometry at time $t$:
 
-$\theta_k(t) = \arctan\left(\frac{b_k(t)}{c_k(t) + \epsilon}\right) \quad \text{for } k \in \{1, 2, 3, 4\}$
+$Θ_k(t) = \arctan\left(\frac{b_k(t)}{c_k(t) + \epsilon}\right) \quad \text{for } k \in \{1, 2, 3, 4\}$
 
 *Note: A small epsilon ($\epsilon$) is recommended in implementation to prevent division by zero if the current price is exactly at a structural level.*
 
@@ -122,7 +140,39 @@ $\theta_k(t) = \arctan\left(\frac{b_k(t)}{c_k(t) + \epsilon}\right) \quad \text{
 Consider the four price-time angles ${θ_1(t-1)}$, ${θ_2(t-1)}$, ${θ_3(t-1)}$ and ${θ_4(t-1)}$ ruling at time ${t-1}$. The **wavelet $W(t)$** function
 is a periodic non-linear function defined as
 
-$W(t) = Δ_\%c(t-1) S(t-1) (\sum^4_{i=1} [\cos θ_i(t-1) + \sin θ_i(t-1)])^2$
+$W(t) = Δc(t-1)⋅S(t-1)⋅\frac {(\sum^4_{i=1} [\cos θ_i(t-1) + \sin θ_i(t-1)])^2} {A}$, where 
+
+$A =  \max_{i=1,...,4} \{(4\sqrt{2} (\cos θ_i(t-1) + \sin θ_i(t-1)))^2\}$
+
+
+## Bar Inbalance ##
+
+Consider a sequence of pair-volume prices $\{p(t),v(t)\}_{t=1,...,T}$ where $p(t)$ is the price assoicated to time $t$. The so-called **balance rule**
+defines a sequence $\{b(t)\}_{t=1,...,T}$ where
+
+$
+b(t) = 
+\begin{cases}
+    b(t-1) & \text{if } Δp(t) = 0 \\
+    \frac {|Δp(t)|}{Δp(t)} & \text{if } Δp(t) \ne 0 \\
+\end{cases}
+$
+
+with $b(t) \in \{-1, 1\}$ and $b(0)$ is $\mathbf {sgn}(p(0))$. Then we define the time inbalance at time $t$ as
+
+$B(t) = \frac{\sum^{k}_{i=1} b(t-i)}{k} $
+
+### Bar Inbalance Ratio ###
+
+The **bar inbalance ratio $B_r(t)$** is defined as
+
+$B_r(t) = \frac{b(t)}{1+B^2(t)}$.
+
+### Bar Inbalance Difference ###
+
+The **bar inbalance Difference $B_d(t)$** is defined as
+
+$B_d(t) = ΔB(t)$.
 
 ## Baseline Forecast Models ##
 
@@ -149,7 +199,7 @@ where $P_d(t-k) = P_↑(t-k) - P_↓(t-k)$
 
 ### Price-Volume Difference Forecast ###
 
-This model forecasts ****price-volume difference**** at time $t$, denoted as $Y_d(t)$, from last $k$ consecutive $Y(t) - Y(t-1)$ differences.
+This model forecasts ****price-volume difference**** at time $t$, denoted as $Y_d(t)$, from last $k$ consecutive $\frac{Y(t) - Y(t-1)}{2}$ differences.
 
 #### Prediction Target ####
 
@@ -163,14 +213,14 @@ The model uses a fixed **lookback window of $k$ bars** (from $t-1$ to $t-k$) and
 | :--- | :--- | :--- | :--- |
 | $Y_d(t-1)$ | $Y_d(t-2)$ | ... | $Y_d(t-k)$ |
 
-where $Y_d(τ) = Y(τ) - Y(τ-1)$
+where $Y_d(τ) = \frac{Y(τ) - Y(τ-1)}{2}$
 
 ---
 NOTE: This model was excluded from the final Meta-Model architecture due to high collinearity with the _Price-Angle Forecast_ described below which was empirically shown to provide a cleaner signal.
 
 ### Wavelet Difference Forecast ###
 
-We want to forecast **wavelet difference $W_d(t)$ (defined as $W_d(t) = W(t) - W(t-1))$** at time $t$.
+We want to forecast **wavelet difference $W_d(t)$ (defined as $W_d(t) = \frac{W(t) - W(t-1)}{2}$)** at time $t$.
 
 #### Input Features ####
 
@@ -179,6 +229,20 @@ A sequence containing past $k$ wavelet differences: $W_d(τ-1)$, $W_d(τ-2)$, ..
 #### Prediction Target ####
 
 Wavelet difference $W_d(τ)$ at time $τ$.
+
+### Inbalance Agression Filter Forecast ###
+
+We want to forecast **inbalance agression filter** $B^{+}(τ)$ at time $τ$. The **inbalance agression filter** is defined as
+
+$B^{+}(τ) = frac {B_r(τ) B_d(τ)}{2}$
+
+#### Input Features ####
+
+A sequence containing past $k$ bar inbalance ratios: $B^{+}(τ-1)$, $B^{+}(τ-2)$, ..., $B^{+}(τ-k)$.
+
+#### Prediction Target ####
+
+Bar inbalance ratio $B^{+}(τ)$ at time $τ$.
 
 ## Quantum Mechanics and Finance ##
 
@@ -275,7 +339,7 @@ This method is based on equating the Quantum Finance Schrödinger Equation (anha
 
 We define the **Schrödinger Gauge** $Ö(t)$ at time $t$ as:
 
-$Ö(t) = 2 \frac{Ö↑(t)-Ö↓(t)}{Ö↑(t)+Ö↓(t)}$
+$Ö(t) =  \mathbf{sign}(Ö↑(t)-Ö↓(t)) \frac{|Ö↑(t)-Ö↓(t)|}{|Ö↑(t)|+|Ö↓(t)|}$
 
 where:
 
@@ -311,22 +375,29 @@ Last $k$ schrödinger gauge differences.
 | :--- | :--- | :--- | :--- |
 | $Ö_d(t-1)$ | $Ö_d(t-2)$ | ... | $Ö_d(t-k)$ |
 
-where $Ö_d(τ) = Ö(τ) - Ö(τ-1)$
+where $Ö_d(τ) = \frac {Ö(τ) - Ö(τ-1)}{2}$
 
 ## The Meta Model ##
 
-Let $X_v(t)$, $X_g(t)$ and $X_a(t)$ be **price-volume**, **schrödinger gauge** and **price-time angle** outputs from the three aforementioned base line models. The 
-meta model linearly combines this three outputs to produce a signed prediction. The linear combination is defined as:
+The metamodel is an ensemble model combining targets from the five base models; targets from base models 
+will become input for the ensemble model.
 
-$$\text{Meta Model Output}(t) = w_v \cdot X_v(t) + w_g \cdot X_g(t) + w_a \cdot X_a(t)$$
+### Prediction Target ###
 
-Where $w_v$, $w_g$, and $w_a$ are learned weights assigned to the respective baseline model outputs. The sign of the output (hopefully) tells the price direction at time ${t}$ (reminder: baseline model use data until $t-1$ to forecast target at $t$.)
+The bounded percentage difference of **close** price at time $t$
 
-The Schrödinger Gauge $Ö(t)$ acts as a contrarian indicator because its sign indicates the current price's proximity to a structural energy boundary, which often precedes a direction change.
+ $Δc(t)$
 
-### Input Roles ###
-| Meta-Feature | Base Model | Concept | Role in Trading Signal | Status |
-| :--- | :--- | :--- | :--- | :--- |
-| $\hat{Y}_d(t)$ | Price-Volume Difference | **Classical Kinetic** (Momentum) | Directional prediction, tends to favor short-term trend following. | **Active** |
-| $\hat{X}_a(t)$ | Price-Angle Forecast | **Probabilistic Contrarian** (Geometry) | Forecasts probability difference $P_d(t)$, tends to favor structural reversion. | **Active** |
-| $\hat{Ö}(t)$ | Schrödinger Gauge | **Quantum Structural** (Boundary Proximity) | **Sign Corrector.** This model's current sign is used to align the combined linear output, acting as a structural anchor. | 
+##### Input Features #####
+
+For discussion simplicity we will represent base model targets as indicated in this table:
+
+| Target Name | Description |
+|------------|-------------|
+| $X_p(t-1)$ | Probability Difference Forecast at time $t-1$|
+| $X_w(t-1)$ | Wavelet Difference Forecast at time $t-1$|
+| $X_b(t-1)$ | Inbalance Agression Filter Forecast at time $t-1$|
+| $X_g(t-1)$ | Schrödinger Gauge Difference Forecast at time $t-1$|
+| $X_v(t-1)$ | Price-Volume Difference Forecast at time $t-1$|
+
+
