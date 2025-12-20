@@ -224,10 +224,10 @@ def best_threshold(results):
 
 def meta_trainer_run(ticker):
     v3_config = {
-        'conviction_threshold': 0.60,  # 2/4 models agreement
+        'conviction_threshold': 0.4,  # 2/4 models agreement
         'risk_circuit_breaker': 0.035, # 3.5% structural risk limit
         'volatility_dampening': 50,    # Adaptive learning speed
-        'learning_rate_init': 0.01     # Base SGD step size
+        'learning_rate_init': 0.025    # Base SGD step size
     }
 
     data = mkt.import_market_data(ticker)        

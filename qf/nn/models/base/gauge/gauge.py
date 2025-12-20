@@ -6,13 +6,6 @@ import numpy as np
 import pandas as pd
 
 def create_model(k, l2_rate,  dropout_rate):
-    """
-    Creates the baseline DNN model for REGRESSION of the Price-Volume Difference (Y_d).
-
-    k: lookback window size (e.g., 14).
-    l2_rate: The strength of the L2 regularization.
-    dropout_rate: The fraction of neurons to drop during training.
-    """
     
     # Input Shape: k time steps * 1 feature (Y_d)
     input_shape = (k * 1,)
@@ -24,13 +17,10 @@ def create_model(k, l2_rate,  dropout_rate):
         # --- Hidden Layer 1 ---
         layers.Dense(64, kernel_regularizer=l2_reg, input_shape=input_shape),
         layers.BatchNormalization(), 
-        layers.Activation('tanh'),
+        layers.LeakyReLU(alpha=0.1),
         layers.Dropout(dropout_rate), 
         
-        # --- Output Layer ---
-        # The target Y_d(t) is a signed value with no known strict bounds, 
-        # so a linear activation (default) is used for regression.
-        layers.Dense(1, activation='tanh')
+        layers.Dense(1, activation='linear')
     ])
     
     model.compile(
@@ -40,52 +30,46 @@ def create_model(k, l2_rate,  dropout_rate):
     )
     return model
 
-def calculate_gauge_series(historical_data: pd.DataFrame) -> pd.Series:
+def create_targets(historical_data, k=14):
     """
-    Helper to calculate the Schrödinger Gauge Ö(t) based on README definitions.
+    Creates the prediction target for the Schrödinger Gauge Difference Forecast.
+    
+    Target: Öd(τ) at time τ.
+    
+    Args:
+        historical_data (pd.DataFrame): Dataframe containing 'Öd'.
+        k (int): Lookback window (unused, kept for compatibility).
+        
+    Returns:
+        np.array: Target values for the current time step.
     """
-    # Assuming E_Low (E^n1) and E_High (E^n2) are pre-calculated in the dataframe
-    # as per the 'Schrödinger Gauge' section of the README.
-    E_Low = historical_data['E_Low']
-    E_High = historical_data['E_High']
-    close = historical_data['Close']
-    
-    # Formula: Ö(t) = 2 * (Ö↑ - Ö↓) / (Ö↑ + Ö↓)
-    # where Ö↑ = E_High - close and Ö↓ = close - E_Low
-    numerator = (E_High - close) - (close - E_Low)
-    denominator = (E_High - close) + (close - E_Low)
-    
-    return 2 * numerator / (denominator + 1e-9)
+    # The target is the current gauge difference Öd(t)
+    return historical_data['Öd'].values
 
-def create_inputs(historical_data: pd.DataFrame, k: int) -> pd.DataFrame:
+def create_inputs(historical_data, k=14):
     """
-    Forecasts Schrödinger Gauge Difference Ö_d(t) from last k differences.
-    Input Features: [Ö_d(t-1), Ö_d(t-2), ..., Ö_d(t-k)]
+    Creates the input features for the Schrödinger Gauge Difference Forecast.
+    
+    Features: Last k schrödinger gauge differences [Öd(t-1), Öd(t-2), ..., Öd(t-k)].
+    
+    Args:
+        historical_data (pd.DataFrame): Dataframe containing 'Öd'.
+        k (int): Lookback window size.
+        
+    Returns:
+        np.array: 2D array of lagged gauge differences.
     """
-    # 1. Calculate the absolute gauge
-    gauge = calculate_gauge_series(historical_data)
-    
-    # 2. Calculate the Gauge Difference: Ö_d(t) = Ö(t) - Ö(t-1)
-    gauge_diff = gauge.diff().rename('Ö')
-    
-    # 3. Create the lookback features for the difference
-    features = []
+    # Features consist of the last k gauge differences
+    # We create a sequence of lags from t-1 back to t-k
+    lags = []
     for i in range(1, k + 1):
-        features.append(gauge_diff.shift(i).rename(f'Ö_d{i}'))
+        lags.append(historical_data['Öd'].shift(i))
     
-    # 4. Concatenate and drop NaNs (k lags + 1 for the initial diff)
-    input_df = pd.concat(features, axis=1).dropna()
-    return input_df
-
-def create_targets(historical_data: pd.DataFrame, k: int) -> pd.Series:
-    """
-    Prediction Target: Schrödinger Gauge Difference Ö_d(t) at time t.
-    Aligned with the inputs from create_inputs.
-    """
-    # 1. Calculate the absolute gauge and its difference
-    gauge = calculate_gauge_series(historical_data)
-    gauge_diff = gauge.diff().rename('Od')
+    # Combine lags into a single feature matrix
+    # Resulting shape: (samples, k)
+    X = np.column_stack(lags)
     
-    # 2. Align with create_inputs by dropping the same initial rows
-    # We drop k + 1 rows: k for the lookback and 1 for the diff() operation
-    return gauge_diff.iloc[k+1:]
+    # Fill initial NaNs resulting from shifts with 0.0 to maintain alignment
+    X = np.nan_to_num(X)
+    
+    return X

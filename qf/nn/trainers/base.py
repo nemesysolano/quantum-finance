@@ -16,6 +16,7 @@ base_model_names = ('prob', 'pricevol', 'wavelets', 'gauge', 'barinbalance')
 # -- base trainer module
 def base_trainer(args):
     ticker = args.ticker.upper()
+    historical_data = mkt.import_market_data(ticker)
     patience = args.patience
     model_factory_name = args.model
     epochs = args.epochs
@@ -26,8 +27,7 @@ def base_trainer(args):
     k = 8 if lookback < 8 or lookback > 30 else lookback
     l2_rate = args.l2_rate
     dropout_rate = args.dropout_rate
-
-    historical_data = mkt.import_market_data(ticker)
+    
     X_train, X_val, X_test, _, _ = mkt.create_datasets(model_factory.create_inputs(historical_data, k))
     X_train_scaled, X_val_scaled, X_test_scaled, _ = nn.scale_features(X_train, X_val, X_test, scale_features)
     Y_train, Y_val, Y_test, _, _= mkt.create_datasets(model_factory.create_targets(historical_data, k))    

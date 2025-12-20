@@ -17,26 +17,22 @@ def create_model(k: int, l2_rate= 1e-4, dropout_rate = 0.01):
     l2_reg = regularizers.l2(l2_rate) if l2_rate > 0 else None
     
     model = keras.Sequential([
-        # --- Hidden Layer ---
-        # The model processes the k-length sequence of past wavelets
-        layers.Dense(128, kernel_regularizer=l2_reg, input_shape=input_shape),
+        # --- Hidden Layer 1 ---
+        layers.Dense(64, kernel_regularizer=l2_reg, input_shape=input_shape),
         layers.BatchNormalization(), 
-        layers.Activation('relu'),
+        layers.LeakyReLU(alpha=0.1),
         layers.Dropout(dropout_rate), 
         
-        # --- Output Layer ---
-        # The target is a percentage change, so a linear activation is used.
-        layers.Dense(1, activation='tanh')
+        layers.Dense(1, activation='linear')
     ])
     
-    # Standard regression compile using Mean Squared Error as the loss function
     model.compile(
         optimizer='adam',
         loss='mse',
         metrics=['mae']
     )
-    
     return model
+
 
 def _create_aligned_data(wavelet_diffs: pd.Series, k: int) -> pd.DataFrame:
     """

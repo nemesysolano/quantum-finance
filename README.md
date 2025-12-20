@@ -81,7 +81,7 @@ If the last structural breach G_b was a **support breach**, the current gap exer
 
 ## Price-Volume Oscillator ##
 
-We define ${Y(t)}$ as the **price-volume** oscillator which is the product of price percentage difference and the squared volume percentage difference:
+We define ${Y(t)}$ as the **price-volume** oscillator as:
 
 $Y(t) = Δp(t)⋅Δ^2v(t)$, where
 
@@ -140,9 +140,9 @@ $Θ_k(t) = \arctan\left(\frac{b_k(t)}{c_k(t) + \epsilon}\right) \quad \text{for 
 Consider the four price-time angles ${θ_1(t-1)}$, ${θ_2(t-1)}$, ${θ_3(t-1)}$ and ${θ_4(t-1)}$ ruling at time ${t-1}$. The **wavelet $W(t)$** function
 is a periodic non-linear function defined as
 
-$W(t) = Δc(t-1)⋅S(t-1)⋅\frac {(\sum^4_{i=1} [\cos θ_i(t-1) + \sin θ_i(t-1)])^2} {A}$, where 
+$W(t) = \mathbf{sgn}(Δc(t-1))⋅S(t-1)⋅\frac {(\sum^4_{i=1} [\cos θ_i(t-1) + \sin θ_i(t-1)])^2} {A}$, where 
 
-$A =  \max_{i=1,...,4} \{(4\sqrt{2} (\cos θ_i(t-1) + \sin θ_i(t-1)))^2\}$
+$A =  \max_{i=1,...,4} \{(4 (\cos θ_i(t-1) + \sin θ_i(t-1)))^2\}$
 
 
 ## Bar Inbalance ##
@@ -234,11 +234,11 @@ Wavelet difference $W_d(τ)$ at time $τ$.
 
 We want to forecast **inbalance agression filter** $B^{+}(τ)$ at time $τ$. The **inbalance agression filter** is defined as
 
-$B^{+}(τ) = frac {B_r(τ) B_d(τ)}{2}$
+$B^{+}(τ) = \frac {B_r(τ) B_d(τ)}{2}$
 
 #### Input Features ####
 
-A sequence containing past $k$ bar inbalance ratios: $B^{+}(τ-1)$, $B^{+}(τ-2)$, ..., $B^{+}(τ-k)$.
+A sequence containing past $k$ bar inbalance filter: $B^{+}(τ-1)$, $B^{+}(τ-2)$, ..., $B^{+}(τ-k)$.
 
 #### Prediction Target ####
 
@@ -339,7 +339,7 @@ This method is based on equating the Quantum Finance Schrödinger Equation (anha
 
 We define the **Schrödinger Gauge** $Ö(t)$ at time $t$ as:
 
-$Ö(t) =  \mathbf{sign}(Ö↑(t)-Ö↓(t)) \frac{|Ö↑(t)-Ö↓(t)|}{|Ö↑(t)|+|Ö↓(t)|}$
+$Ö(t) =  Δ_\%(Ö↓(t),Ö↑(t))$
 
 where:
 
@@ -365,7 +365,7 @@ This model forecasts schrödinger gauge difference $Ö_d(τ)$ at time $τ$.
 
 ##### Prediction Target #####
 
-Schrödinger gauge $Ö_d(τ)$ at time $τ$.
+Schrödinger gauge difference $Ö_d(τ)$ at time $τ$.
 
 ##### Input Features #####
 

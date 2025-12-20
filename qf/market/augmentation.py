@@ -1,404 +1,514 @@
 import numpy as np
 import pandas as pd
 
-# Ensure this import exists in your project structure
-from qf.quantum import  maximum_energy_level, minimum_energy_level
-from qf.stats import empirical_distribution
 from qf.quantum import quantum_lambda
-from qf.context import default_quantization_level
+from qf.quantum import maximum_energy_level, minimum_energy_level
+from qf.stats import empirical_distribution
 
-
-def add_breaking_gap(data: pd.DataFrame, quantization_delta: float) -> pd.DataFrame:
+def add_breaking_gap(historical_data, Q=0.0001):
     """
-    Calculates the Breaking Gap (G(t)) based on Fast Trend structural violations.
-    
-    SIGN CONVENTION:
-    - Positive G (+): Resistance Breach (Upward Break).
-    - Negative G (-): Support Breach (Downward Break).
-    
-    Applies linear decay to the magnitude.
-    """
-    G = pd.Series(0.0, index=data.index)
-    G_b = 0.0  # Last Structural Breach Value (Signed)
-    k = 0      # Bars elapsed
-
-    for t in range(3, len(data)):
-        current_time = data.index[t]
-        
-        l_t, h_t = data['Low'].iloc[t], data['High'].iloc[t]
-        l_tm1, h_tm1 = data['Low'].iloc[t-1], data['High'].iloc[t-1]
-        l_tm2, h_tm2 = data['Low'].iloc[t-2], data['High'].iloc[t-2]
-        c_tm2, c_tm3 = data['Close'].iloc[t-2], data['Close'].iloc[t-3]
-        
-        new_breach = False
-        breach_val = 0.0
-
-        # Case 1: Support Breach (Ascending Trend Violation) -> NEGATIVE Sign
-        if (c_tm3 < c_tm2) and (l_t < l_tm2) and (l_tm2 < l_tm1):
-            new_breach = True
-            # Magnitude is (l_tm2 - l_t). We apply negative sign.
-            breach_val = -(l_tm2 - l_t)
-
-        # Case 2: Resistance Breach (Descending Trend Violation) -> POSITIVE Sign
-        elif (c_tm3 > c_tm2) and (h_t > h_tm2) and (h_tm2 > h_tm1):
-            new_breach = True
-            # Magnitude is (h_t - h_tm2). We apply positive sign.
-            breach_val = (h_t - h_tm2)
-        
-        # --- Update State ---
-        if new_breach:
-            G_b = breach_val
-            k = 0 
-            G.loc[current_time] = G_b
-        else:
-            k += 1
-            # Linear Decay on Magnitude, preserving Sign
-            magnitude = max(abs(G_b) - k * quantization_delta, 0.0)
-            # Restore sign
-            G.loc[current_time] = magnitude if G_b >= 0 else -magnitude
-
-    data['G'] = G
-    data.dropna(inplace=True)
-    return data
-
-def add_swing_ratio(historical_data: pd.DataFrame) -> pd.DataFrame:
-    """
-    Calculates the Swing Ratio (S) based on the current decayed gap (G)
-    and the local price volatility (4-bar range).
-    
-    Formula:
-    R(t) = max(High[t...t-3]) - min(Low[t...t-3])
-    A(t) = max(|G(t)|, R(t))
-    S(t) = |G(t)| / A(t)
+    Calculates the breaking gap G(t) based on structural breaches and decay.
     
     Args:
-        historical_data (pd.DataFrame): DataFrame containing 'High', 'Low', and 'G' columns.
+        historical_data (pd.DataFrame): Must contain 'open', 'High', 'Low', 'Close'.
+        Q (float): Per-bar decay rate.
         
     Returns:
-        pd.DataFrame: Original DataFrame with 'S' column added.
+        pd.DataFrame: Dataframe with 'G' (Gap magnitude) and 'Gd' (Gap direction/type).
+    """
+    df = historical_data
+    n = len(df)
+    
+    # Initialize output columns
+    g_values = np.zeros(n)
+    gd_values = [None] * n # Renamed from breach_type to Gd
+    
+    # State variables for the "last structural breach"
+    gb = 0.0      # Initial magnitude of the last breach
+    k = 0         # Bars elapsed since breach
+    last_type = None
+    
+    # Calculations require at least 4 bars to check t-3 indices
+    for t in range(3, n):
+        current_gb = 0.0
+        current_type = None
+        
+        # 1. Check for Support Breach (Ascending Trend Violation)
+        if (df['Close'].iloc[t-3] < df['Close'].iloc[t-2] and 
+            df['Low'].iloc[t] < df['Low'].iloc[t-2] and 
+            df['Low'].iloc[t-2] < df['Low'].iloc[t-1]):
+            
+            current_gb = df['Low'].iloc[t-2] - df['Low'].iloc[t]
+            current_type = -1
+            
+        # 2. Check for Resistance Breach (Descending Trend Violation)
+        elif (df['Close'].iloc[t-3] > df['Close'].iloc[t-2] and 
+              df['High'].iloc[t] > df['High'].iloc[t-2] and 
+              df['High'].iloc[t-2] > df['High'].iloc[t-1]):
+              
+            current_gb = df['High'].iloc[t] - df['High'].iloc[t-2]
+            current_type = 1
+            
+        # 3. Update Breach State if a new violation occurs
+        if current_gb > 0:
+            gb = current_gb
+            k = 1 
+            last_type = current_type
+        else:
+            k += 1 # Increment time elapsed since the last stored Gb
+            
+        # 4. Apply Decay Formula: G(t) = max(Gb - k*Q, 0)
+        g_values[t] = max(gb - (k * Q), 0)
+        gd_values[t] = last_type
+
+    df['G'] = g_values
+    df['Gd'] = gd_values # Directional label
+    df.dropna(inplace=True)
+    return df
+
+def add_swing_ratio(historical_data):
+    """
+    Calculates the swing ratio S(t) based on the breaking gap and local range.
+    
+    Formula: S(t) = |G(t)| / A(t)
+    Where:
+        A(t) = max(|G(t)|, R(t))
+        R(t) = max(h_{t-i}) - min(l_{t-i}) for i in 0...3
+    
+    Args:
+        historical_data (pd.DataFrame): Dataframe already containing 'G' (Breaking Gap).
+                                      Must contain 'High' and 'Low'.
+    Returns:
+        pd.DataFrame: Dataframe with added 'S' (Swing Ratio) column.
+    """
+    df = historical_data
+    n = len(df)
+    s_values = np.zeros(n)
+    
+    # Requirement: Sequence must be longer than 2 bars. 
+    # R(t) uses a lookback of 4 bars (i=0 to 3).
+    for t in range(3, n):
+        # 1. Calculate Local Range R(t) over the last 4 bars (0, 1, 2, 3)
+        # Using .iloc[t-3:t+1] to get the slice of 4 elements ending at t
+        local_highs = df['High'].iloc[t-3:t+1]
+        local_lows = df['Low'].iloc[t-3:t+1]
+        
+        rt = local_highs.max() - local_lows.min()
+        
+        # 2. Calculate Absolute Reference A(t)
+        # G(t) magnitude is stored in column 'G'
+        gt_abs = abs(df['G'].iloc[t])
+        at = max(gt_abs, rt)
+        
+        # 3. Calculate Swing Ratio S(t)
+        if at > 0:
+            s_values[t] = gt_abs / at
+        else:
+            s_values[t] = 0.0
+            
+    df['S'] = s_values
+    df.dropna(inplace=True)
+    return df
+
+def add_directional_probabilities(historical_data):
+    """
+    Calculates directional probabilities P↑(t) and P↓(t) based on structural breaches.
+    
+    Logic:
+    - Resistance Breach (Gd = 1): Current gap exerts downward pressure.
+    - Support Breach (Gd = -1): Current gap exerts upward pressure.
+    
+    Args:
+        historical_data (pd.DataFrame): Dataframe containing 'S', 'Gd', and 'Close'.
+        
+    Returns:
+        pd.DataFrame: Dataframe with 'P↑' and 'P↓' columns added.
+    """
+    df = historical_data
+    n = len(df)
+    
+    # Initialize output arrays
+    p_up = np.zeros(n)
+    p_down = np.zeros(n)
+    
+    # 1. Calculate Bounded Percentage Difference for Close prices: Δc(t)
+    # Formula: (c(t) - c(t-1)) / (|c(t)| + |c(t-1)|)
+    c = df['Close'].values
+    c_prev = df['Close'].shift(1).values
+    
+    delta_c = (c - c_prev) / (np.abs(c) + np.abs(c_prev))
+    
+    # 2. Calculate Squared Serial Difference: Δ²c(t)
+    delta_c_sq = np.square(delta_c)
+    
+    for t in range(1, n):
+        st = df['S'].iloc[t]
+        gd = df['Gd'].iloc[t]
+        sq_diff = delta_c_sq[t]
+        
+        # Support Breach Case (Ascending Trend Violation)
+        if gd == -1:
+            p_up[t] = min(1.0, st * sq_diff)
+            p_down[t] = 1.0 - st
+            
+        # Resistance Breach Case (Descending Trend Violation)
+        elif gd == 1:
+            p_down[t] = min(1.0, st * sq_diff)
+            p_up[t] = 1.0 - st
+            
+        # Default case (no breach history)
+        else:
+            p_up[t] = 0.5
+            p_down[t] = 0.5
+            
+    df['P↑'] = p_up
+    df['P↓'] = p_down
+    df.dropna(inplace=True)
+    return df
+
+
+def add_price_volume_oscillator(historical_data):
+    """
+    Calculates the price-volume oscillator Y(t).
+    
+    Formula: Y(t) = Δp(t) * Δ²v(t)
+    Where:
+        Δp(t) = Bounded percentage difference of Close price (k=1)
+        Δ²v(t) = Squared bounded percentage difference of Volume (k=1)
+        
+    Args:
+        historical_data (pd.DataFrame): Dataframe containing 'Close' and 'Volume'.
+        
+    Returns:
+        pd.DataFrame: Dataframe with added 'Y' column.
     """
     df = historical_data
     
-    # Ensure 'G' (Breaking Gap) exists
-    if 'G' not in df.columns:
-        raise ValueError("The 'G' column (Breaking Gap) must be added before calculating Swing Ratio.")
-
-    # 1. Calculate Local Range (R) over a 4-bar window (t, t-1, t-2, t-3)
-    # Using rolling windows to find max high and min low
-    # The window=4 includes the current row and the 3 previous rows.
-    local_high = df['High'].rolling(window=4).max()
-    local_low = df['Low'].rolling(window=4).min()
-    R = local_high - local_low
-
-    # 2. Get the absolute magnitude of the current decayed gap
-    abs_G = df['G'].abs()
-
-    # 3. Calculate Absolute Reference (A) 
-    # A is the element-wise maximum of the gap magnitude and the local range
-    A = np.maximum(abs_G, R)
-
-    # 4. Compute Swing Ratio S(t)
-    # We use np.divide to handle cases where A might be zero (e.g., flat market with no gap)
-    # If A is 0, the result is 0 (Neutral pressure).
-    S = np.divide(
-        abs_G,
-        A,
-        out=np.zeros_like(abs_G),
-        where=A != 0
-    )
-
-    df['S'] = S
-    df['A'] = A
+    # Extract values
+    p = df['Close'].values
+    v = df['Volume'].values
     
-    # Drop NaNs created by the rolling window (first 3 rows will be NaN)
-    df.dropna(subset=['S'], inplace=True)
+    # Calculate shifts (t-1)
+    p_prev = df['Close'].shift(1).values
+    v_prev = df['Volume'].shift(1).values
     
+    # 1. Calculate Δp(t): Bounded Percentage Difference of Price
+    # Formula: (p(t) - p(t-1)) / (|p(t)| + |p(t-1)|)
+    delta_p = (p - p_prev) / (np.abs(p) + np.abs(p_prev))
+    
+    # 2. Calculate Δv(t): Bounded Percentage Difference of Volume
+    delta_v = (v - v_prev) / (np.abs(v) + np.abs(v_prev))
+    
+    # 3. Calculate Δ²v(t): Squared Serial Difference of Volume
+    delta_v_sq = np.square(delta_v)
+    
+    # 4. Calculate Y(t)
+    df['Y'] = delta_p * delta_v_sq
+    
+    # Fill NaN at index 0 (result of shift) with 0.0
+    
+    df.dropna(inplace=True)
     return df
-def add_directional_probabilities(df: pd.DataFrame) -> pd.DataFrame:
+
+def add_price_time_angles(historical_data, epsilon=1e-9):
     """
-    Calculates Directional Probabilities (P↑, P↓) based on:
-    1. The Swing Ratio (S(t))
-    2. The last structural breach type (G_b)
-    3. The price percentage change (r_p) using an exponential squashing function.
+    Calculates the four Price-Time Angles (Θ1...Θ4) based on structural geometry.
+    
+    Args:
+        historical_data (pd.DataFrame): Dataframe containing 'High' and 'Low'.
+        epsilon (float): Small value to prevent division by zero.
+        
+    Returns:
+        pd.DataFrame: Dataframe with 'ϴ1', 'ϴ2', 'ϴ3', 'ϴ4' columns added.
     """
-    # 1. Calculate the percentage difference r_p(t) (referred to as Δ_%c(t) in README)
-    # Formula: 2 * (c(t) - c(t-1)) / (c(t) + c(t-1))
-    c_t = df['Close']
-    c_prev = df['Close'].shift(1)
-    rp = 2 * (c_t - c_prev) / (c_t + c_prev)
+    df = historical_data
+    n = len(df)
     
-    # Initialize probability columns
-    df['P↑'] = 0.5
-    df['P↓'] = 0.5
+    # Initialize result arrays
+    theta = {f'ϴ{k}': np.zeros(n) for k in range(1, 5)}
     
-    # We assume 'G' is a column identifying the breach:
-    # 'resistance' for Descending Trend Violation
-    # 'support' for Ascending Trend Violation
-    # We assume 'S' is the pre-calculated Swing Ratio column
+    # Iterate through the data to find structural pivots
+    # We start from index 1 because we look backward (t-j)
+    for t in range(1, n):
+        h_t = df['High'].iloc[t]
+        l_t = df['Low'].iloc[t]
+        
+        # 1. Find Closest Extremes and their indices (i)
+        # Closest Higher High (h_up): h(t-j) > h(t)
+        i_h_up = next((j for j in range(1, t + 1) if df['High'].iloc[t-j] > h_t), 1)
+        h_up = df['High'].iloc[t - i_h_up]
+        
+        # Closest Lower High (h_down): h(t-j) < h(t)
+        i_h_down = next((j for j in range(1, t + 1) if df['High'].iloc[t-j] < h_t), 1)
+        h_down = df['High'].iloc[t - i_h_down]
+        
+        # Closest Higher Low (l_up): l(t-j) > l(t)
+        i_l_up = next((j for j in range(1, t + 1) if df['Low'].iloc[t-j] > l_t), 1)
+        l_up = df['Low'].iloc[t - i_l_up]
+        
+        # Closest Lower Low (l_down): l(t-j) < l(t)
+        i_l_down = next((j for j in range(1, t + 1) if df['Low'].iloc[t-j] < l_t), 1)
+        l_down = df['Low'].iloc[t - i_l_down]
+
+        # 2. Normalization Factors
+        # Time Lookback Base B(t)
+        bt_factor = max(i_h_up, i_h_down, i_l_up, i_l_down)
+        
+        # Price Range Base C(t)
+        ct_factor = max(h_up - h_t, h_t - h_down, l_up - l_t, l_t - l_down)
+        
+        # 3. Normalized Vectors
+        # Time vector b(t)
+        b = [i_h_up/bt_factor, i_h_down/bt_factor, i_l_up/bt_factor, i_l_down/bt_factor]
+        
+        # Price vector c(t)
+        c = [
+            (h_up - h_t) / (ct_factor + epsilon),
+            (h_t - h_down) / (ct_factor + epsilon),
+            (l_up - l_t) / (ct_factor + epsilon),
+            (l_t - l_down) / (ct_factor + epsilon)
+        ]
+        
+        # 4. Calculate Theta Angles: arctan(b_k / (c_k + epsilon))
+        for k in range(4):
+            theta[f'ϴ{k+1}'][t] = np.arctan(b[k] / (c[k] + epsilon))
+            
+    # Add to dataframe
+    for col, values in theta.items():
+        df[col] = values
+        
+    df.dropna(inplace=True)
+    return df
+
+import numpy as np
+import pandas as pd
+
+def add_wavelets(historical_data):
+    """
+    Implements the Wavelet function W(t) using the sgn(Δc) adjustment.
     
-    # Resistance Breach Case: Downward pressure
-    # P↓ = min(1, S(t) * exp(-rp(t)))
-    # P↑ = 1 - P↓
-    res_mask = df['G'] > 0
-    df.loc[res_mask, 'P↓'] = np.minimum(1.0, df.loc[res_mask, 'S'] * np.exp(-rp[res_mask]))
-    df.loc[res_mask, 'P↑'] = 1.0 - df.loc[res_mask, 'P↓']
+    Formula: 
+    W(t) = sgn(Δc(t-1)) * S(t-1) * (sum(cos(θi) + sin(θi)))^2 / A
+    Where:
+        A = max_{i=1...4} {(4 * (cos(θi) + sin(θi)))^2}
+        θi are the price-time angles at t-1.
+        
+    Args:
+        historical_data (pd.DataFrame): Must contain 'Close', 'S', and 'ϴ1'...'ϴ4'.
+        
+    Returns:
+        pd.DataFrame: Dataframe with 'W' column added.
+    """
+    df = historical_data
+    n = len(df)
+    w_values = np.zeros(n)
     
-    # Support Breach Case: Upward pressure
-    # P↑ = min(1, S(t) * exp(rp(t)))
-    # P↓ = 1 - P↑
-    sup_mask = df['G'] < 0
-    df.loc[sup_mask, 'P↑'] = np.minimum(1.0, df.loc[sup_mask, 'S'] * np.exp(rp[sup_mask]))
-    df.loc[sup_mask, 'P↓'] = 1.0 - df.loc[sup_mask, 'P↑']
+    # 1. Calculate Δc(t): Bounded Percentage Difference of Close
+    # We only need the sign of this difference for the wavelet formula
+    c = df['Close'].values
+    c_prev = df['Close'].shift(1).values
+    delta_c = (c - c_prev) / (np.abs(c) + np.abs(c_prev) + 1e-9)
+    sgn_delta_c = np.sign(delta_c)
     
-    # Handle the probability difference used in baseline models: Pd = P↑ - P↓
+    # 2. Iterate to calculate W(t) using t-1 values
+    for t in range(1, n):
+        # Retrieve the state of the system at the close of the previous bar (t-1)
+        sgn_dc_prev = sgn_delta_c[t-1]
+        s_prev = df['S'].iloc[t-1]
+        
+        # Collect angles θ1...θ4 at t-1
+        angles = [df[f'ϴ{i}'].iloc[t-1] for i in range(1, 5)]
+        
+        # Calculate periodic components: (cos(θ) + sin(θ))
+        trig_terms = [np.cos(theta) + np.sin(theta) for theta in angles]
+        
+        # 3. Calculate the squared sum (Numerator)
+        # This represents the total constructive/destructive geometric interference
+        numerator = np.square(sum(trig_terms))
+        
+        # 4. Calculate normalization factor A
+        # A = max over i of (4 * (cos(θi) + sin(θi)))^2
+        # This ensures the geometric ratio is bounded by 1.0
+        a_candidates = [np.square(4 * val) for val in trig_terms]
+        A = max(a_candidates)
+        
+        # 5. Final Wavelet Calculation W(t)
+        if A > 0:
+            w_values[t] = sgn_dc_prev * s_prev * (numerator / A)
+        else:
+            w_values[t] = 0.0
+            
+    df['W'] = w_values
+    df.dropna(inplace=True)
+    return df
+
+def add_bar_inbalance_ratio_and_difference(historical_data, k=14):
+    """
+    Calculates Bar Inbalance Ratio (Br) and Bar Inbalance Difference (Bd).
+    
+    Args:
+        historical_data (pd.DataFrame): Dataframe containing 'Close'.
+        k (int): Lookback window for the time inbalance B(t). Default is 14.
+        
+    Returns:
+        pd.DataFrame: Dataframe with 'Br' and 'Bd' columns added.
+    """
+    df = historical_data
+    n = len(df)
+    
+    # 1. Calculate the balance sequence b(t)
+    # b(t) = b(t-1) if Δp(t) == 0, else sgn(Δp(t))
+    prices = df['Close'].values
+    delta_p = np.diff(prices, prepend=prices[0])
+    
+    b = np.zeros(n)
+    # Initial value b(0) is sgn(p(0))
+    b[0] = 1 if prices[0] >= 0 else -1
+    
+    for t in range(1, n):
+        if delta_p[t] == 0:
+            b[t] = b[t-1]
+        else:
+            # sgn(Δp(t)) = |Δp(t)| / Δp(t)
+            b[t] = np.sign(delta_p[t])
+            
+    # 2. Calculate Time Inbalance B(t)
+    # B(t) = (sum of b(t-i) for i=1 to k) / k
+    # We use a rolling mean shifted by 1 to represent the sum of previous k elements
+    b_series = pd.Series(b)
+    B_t = b_series.rolling(window=k).mean().shift(1).fillna(0).values
+    
+    # 3. Calculate Bar Inbalance Ratio Br(t)
+    # Br(t) = b(t) / (1 + B(t)^2)
+    br = b / (1 + np.square(B_t))
+    
+    # 4. Calculate Bar Inbalance Difference Bd(t)
+    # Bd(t) = ΔB(t) = Bounded percentage difference of B(t) (k=1)
+    # Note: Using the utility function Δ% defined in the README
+    B_t_prev = pd.Series(B_t).shift(1).values
+    bd = (B_t - B_t_prev) / (np.abs(B_t) + np.abs(B_t_prev) + 1e-9)
+    
+    df['Br'] = br
+    df['Bd'] = bd # Handle division by zero/NaN
+    df.dropna(inplace=True)
+    return df
+
+def add_probability_differences(historical_data):
+    """
+    Calculates the Probability Difference (Pd) between upward and downward pressures.
+    
+    Formula: Pd(t) = P↑(t) - P↓(t)
+    
+    Args:
+        historical_data (pd.DataFrame): Dataframe containing 'P↑' and 'P↓'.
+        
+    Returns:
+        pd.DataFrame: Dataframe with the 'Pd' column added.
+    """
+    df = historical_data.copy()
+    
+    # Calculate the net difference
+    # P↑: Likelihood of upward move
+    # P↓: Likelihood of downward move
     df['Pd'] = df['P↑'] - df['P↓']
     
     return df
 
-def add_price_volume_strength_oscillator(historical_data: pd.DataFrame, price: str) -> pd.DataFrame:
+
+def add_price_volume_differences(historical_data):
     """
-    Calculates and adds the Price-Volume Strength Oscillator (Y) to the DataFrame.
-    The new column is named 'Y_{price}'.
+    Calculates the Price-Volume Difference (Yd) using the oscillator Y.
     
-    Formula: Y(t) = [2(p(t) - p(t-1)) / (p(t) + p(t-1))] * [v(t) / v(t-1)]
+    Formula: Yd(t) = Δ(Y(t)) = Bounded percentage difference of Y at k=1.
+    
+    Args:
+        historical_data (pd.DataFrame): Dataframe containing 'Y'.
+        
+    Returns:
+        pd.DataFrame: Dataframe with added 'Yd' column.
     """
     df = historical_data
     
-    # Ensure necessary columns exist
-    if price not in df.columns or 'Volume' not in df.columns:
-        raise ValueError(f"Columns '{price}' and 'Volume' must exist in the DataFrame.")
-
-    # 1. Get current and previous price and volume series
-    p_t = df[price]
-    p_prev = p_t.shift(1)
+    # Extract current and previous values of the oscillator Y
+    y = df['Y'].values
+    y_prev = df['Y'].shift(1).values
     
-    v_t = df['Volume']
-    v_prev = v_t.shift(1)
-
-    # 2. Calculate Price Term: 2 * (p(t) - p(t-1)) / (p(t) + p(t-1))
-    # We use np.divide to handle cases where (p(t) + p(t-1)) might be 0 (unlikely but possible)
-    price_sum = p_t + p_prev
-    price_diff = p_t - p_prev
+    # Calculate Bounded Percentage Difference: Δ%(a, b) = (b-a) / (|a| + |b|)
+    # This represents the Serial Difference Δ(Y(t), 1)
+    # Epsilon added to denominator to ensure stability
+    numerator = y - y_prev
+    denominator = np.abs(y) + np.abs(y_prev) + 1e-9
     
-    price_term = np.divide(
-        2 * price_diff,
-        price_sum,
-        out=np.zeros_like(p_t, dtype=float),
-        where=price_sum != 0
-    )
-
-    # 3. Calculate Volume Term: v(t) / v(t-1)
-    # Handle division by zero if v(t-1) is 0
-    volume_term = np.divide(
-        v_t,
-        v_prev,
-        out=np.zeros_like(v_t, dtype=float),
-        where=v_prev != 0
-    )
-
-    # 4. Compute Oscillator Y(t)
-    y_values = price_term * volume_term
+    df['Yd'] = numerator / denominator
     
-    # 5. Assign to new column
-    col_name = f"Y_{price}"
-    df[col_name] = y_values
-    
-    # Remove the first row which will be NaN due to shifting
-    # (Optional: depends on if you want to preserve the original shape)
-    df.dropna(subset=[col_name], inplace=True)
-    
-    return df
-
-
-def add_closest_higher_high(historical_data):
-    highs = historical_data['High']
-    num_rows = len(historical_data)
-    result_val = np.full(num_rows, np.nan)
-    result_days = np.full(num_rows, np.nan)
-
-    for t in range(1, num_rows):
-        current_high = highs.iloc[t]
-        for i in range(1, t + 1):
-            past_high = highs.iloc[t - i]
-            if past_high > current_high:
-                result_val[t] = past_high
-                result_days[t] = i
-                break
-    historical_data['h_↑'] = result_val
-    historical_data['Dh_↑'] = result_days
-    historical_data.dropna(inplace=True)
-
-def add_closest_lower_high(historical_data):
-    highs = historical_data['High']
-    num_rows = len(historical_data)
-    result_val = np.full(num_rows, np.nan)
-    result_days = np.full(num_rows, np.nan)
-
-    for t in range(1, num_rows):
-        current_high = highs.iloc[t]
-        for i in range(1, t + 1):
-            past_high = highs.iloc[t - i]
-            if past_high < current_high:
-                result_val[t] = past_high
-                result_days[t] = i
-                break
-    historical_data['h_↓'] = result_val
-    historical_data['Dh_↓'] = result_days
-    historical_data.dropna(inplace=True)
-
-def add_closest_higher_low(historical_data):
-    lows = historical_data['Low']
-    num_rows = len(historical_data)
-    result_val = np.full(num_rows, np.nan)
-    result_days = np.full(num_rows, np.nan)
-
-    for t in range(1, num_rows):
-        current_low = lows.iloc[t]
-        for i in range(1, t + 1):
-            past_low = lows.iloc[t - i]
-            if past_low > current_low:
-                result_val[t] = past_low
-                result_days[t] = i
-                break
-    historical_data['l_↑'] = result_val
-    historical_data['Dl_↑'] = result_days
-    historical_data.dropna(inplace=True)
-
-def add_closest_lower_low(historical_data):
-    lows = historical_data['Low']
-    num_rows = len(historical_data)
-    result_val = np.full(num_rows, np.nan)
-    result_days = np.full(num_rows, np.nan)
-    for t in range(1, num_rows):
-        current_low = lows.iloc[t]
-        for i in range(1, t + 1):
-            past_low = lows.iloc[t - i]
-            if past_low < current_low:
-                result_val[t] = past_low
-                result_days[t] = i
-                break
-    historical_data['l_↓'] = result_val
-    historical_data['Dl_↓'] = result_days
-    historical_data.dropna(inplace=True)
-
-def identify_pivots(df, window=5):
-    df['is_pivot_high'] = df['High'].rolling(window=window*2+1, center=True).max() == df['High']
-    df['is_pivot_low'] = df['Low'].rolling(window=window*2+1, center=True).min() == df['Low']
-    return df
-
-def get_nearest_structural_extreme(current_idx, current_val, df, pivot_col, price_col, comparison):    
-    for past_idx in range(current_idx - 1, -1, -1):
-        if df.iat[past_idx, df.columns.get_loc(pivot_col)]: # Check if it is a pivot
-            past_val = df.iat[past_idx, df.columns.get_loc(price_col)]
-            if comparison(past_val, current_val):
-                return past_idx
-    return -1
-
-def add_cosine_and_sine_for_price_time_angles(df):
-    """
-    Calculates Price-Time angles based on Fractal Pivots and ATR Normalization.
-    
-    Implements:
-    A. Fractal Pivot Search (Structural points instead of noise).
-    B. ATR Normalization (Gann Box stabilization).
-    C. Edge Case Handling (Breakout constants).
-    """
-    
-    # 1. Ensure Dependencies
-    # We need ATR for normalization. Assuming 'ATR' or 'Atrp14' exists. 
-    # If using 'Atrp14' (percentage), we convert back to absolute ATR approx or calculate it.
-    # Here we will calculate a standard 14-period ATR for safety.
-    high_low = df['High'] - df['Low']
-    high_close = np.abs(df['High'] - df['Close'].shift())
-    low_close = np.abs(df['Low'] - df['Close'].shift())
-    ranges = pd.concat([high_low, high_close, low_close], axis=1)
-    true_range = np.max(ranges, axis=1)
-    df['ATR_14'] = true_range.rolling(14).mean()
-
-    # 2. Identify Structural Pivots (Suggestion A)
-    # Using a 5-day window (2 days before, 2 days after)
-    df = identify_pivots(df, window=2)
-
-    # Initialize columns for angles (theta)
-    # 1: Higher High, 2: Lower High, 3: Higher Low, 4: Lower Low
-    thetas = {1: [], 2: [], 3: [], 4: []}
-    
-    # Comparisons for the 4 extremes
-    # Higher High: Past High > Current High
-    # Lower High: Past High < Current High
-    # Higher Low: Past Low > Current Low
-    # Lower Low: Past Low < Current Low
-    comparisons = {
-        1: ('is_pivot_high', 'High', lambda p, c: p > c),
-        2: ('is_pivot_high', 'High', lambda p, c: p < c),
-        3: ('is_pivot_low', 'Low', lambda p, c: p > c),
-        4: ('is_pivot_low', 'Low', lambda p, c: p < c)
-    }
-
-    # Iterate through the DataFrame
-    # Note: Iterating rows is slow in Pandas, but necessary for complex lookback logic 
-    # that varies per row.
-    
-    for i in range(len(df)):
-        if i < 20: # Skip beginning where ATR/Pivots might be unstable
-            for k in thetas: thetas[k].append(0)
-            continue
-            
-        atr = df.iat[i, df.columns.get_loc('ATR_14')]
-        if pd.isna(atr) or atr == 0:
-            atr = df.iat[i, df.columns.get_loc('Close')] * 0.01 # Fallback
-            
-        current_time_idx = i
-        
-        for k, (pivot_col, price_col, comp_func) in comparisons.items():
-            current_price = df.iat[i, df.columns.get_loc(price_col)]
-            
-            # Find closest structural extreme
-            past_idx = get_nearest_structural_extreme(
-                current_time_idx, current_price, df, pivot_col, price_col, comp_func
-            )
-            
-            if past_idx != -1:
-                # Suggestion B: Stabilized Normalization
-                # Slope = (Delta Price) / (Delta Time * ATR)
-                # This normalizes the "speed" of the move relative to volatility.
-                
-                past_price = df.iat[past_idx, df.columns.get_loc(price_col)]
-                delta_price = current_price - past_price
-                delta_time = current_time_idx - past_idx # Number of bars
-                
-                # Gann Theory: 45 degrees (slope 1) is a "balanced" market.
-                # If price moves 1 ATR in 1 day, slope is 1.
-                normalized_slope = delta_price / (delta_time * atr)
-                
-                # Calculate Angle in Radians
-                angle = np.arctan(normalized_slope)
-                thetas[k].append(angle)
-            else:
-                # Suggestion C: Edge Case Handling (Breakout)
-                # If we are making a New High (no Higher High found), 
-                # we are in "blue sky" mode. 
-                # Resistance is effectively infinite or vertical (90 deg / pi/2).
-                if k == 1: # Higher High (Resistance) missing -> Bullish Breakout
-                    thetas[k].append(np.pi / 2)
-                elif k == 4: # Lower Low (Support) missing -> Bearish Breakdown
-                    thetas[k].append(-np.pi / 2)
-                else:
-                    thetas[k].append(0)
-
-
-    # 3. Add Cosine and Sine features
-    for j in range(len(thetas)):
-        k = j + 1
-        df[f'cos_θ{k}'] = np.cos(thetas[k])
-        df[f'sin_θ{k}'] = np.sin(thetas[k])
-
-
-    # Clean up temporary columns
-    df.drop(columns=['is_pivot_high', 'is_pivot_low', 'ATR_14'], inplace=True, errors='ignore')
+    # Fill the initial NaN resulting from the lookback
     df.dropna(inplace=True)
+    
     return df
 
+def add_wavelet_differences(historical_data):
+    """
+    Calculates the Wavelet Difference (Wd).
+    
+    Formula: Wd(t) = Δ(W(t)) = Bounded percentage difference of W at k=1.
+    
+    Args:
+        historical_data (pd.DataFrame): Dataframe containing the 'W' column.
+        
+    Returns:
+        pd.DataFrame: Dataframe with added 'Wd' column.
+    """
+    df = historical_data
+    
+    # Extract current and previous values of the Wavelet W
+    w = df['W'].values
+    w_prev = df['W'].shift(1).values
+    
+    # Calculate Bounded Percentage Difference: Δ%(a, b) = (b - a) / (|a| + |b|)
+    # This represents the Serial Difference Δ(W(t), 1)
+    # Small epsilon added to avoid division by zero
+    numerator = w - w_prev
+    denominator = np.abs(w) + np.abs(w_prev) + 1e-9
+    
+    df['Wd'] = numerator / denominator
+    
+    # Fill the initial NaN resulting from the shift
+    df.dropna(inplace=True)
+    
+    return df
+
+def add_inbalance_agression_filter(historical_data):
+    """
+    Calculates the Inbalance Aggression Filter (B+).
+    
+    Formula: B+(t) = Br(t) * |Bd(t)|
+    Where:
+        Br(t) = Bar Inbalance Ratio
+        Bd(t) = Bar Inbalance Difference
+        
+    Args:
+        historical_data (pd.DataFrame): Dataframe containing 'Br' and 'Bd'.
+        
+    Returns:
+        pd.DataFrame: Dataframe with added 'B+' column.
+    """
+    df = historical_data.copy()
+    
+    # Extract previously calculated components
+    # Br(t): Current directional inbalance ratio [-1, 1]
+    # Bd(t): Velocity of time-inbalance change [-1, 1]
+    br = df['Br'].values
+    bd = df['Bd'].values
+    
+    # Calculate B+: Captures aggressive directional shifts
+    # Using the absolute value of Bd ensures the sign of B+ 
+    # always matches the direction of the imbalance (Br).
+    df['B+'] = br * np.abs(bd)
+    
+    # Handle potential NaNs from early lookbacks
+    df.dropna(inplace=True)
+    
+    return df
 
 def add_boundary_energy_levels(historical_data: pd.DataFrame, quantization_level: int = 1e2):
     """
@@ -416,112 +526,69 @@ def add_boundary_energy_levels(historical_data: pd.DataFrame, quantization_level
     historical_data['E_High'] = upper_boundaries(historical_data['High'])
     historical_data.dropna(inplace=True)
 
-def add_wavelets(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Calculates the Wavelet W(t) based on README definitions.
-    
-    W(t) = Δ%c(t-1) * S(t-1) * sum(cos(θ) + sin(θ))
-    """
-    # 1. Calculate Signed Momentum: Δ%c(t)
-    c = df['Close']
-    rp = 2 * (c - c.shift(1)) / (c + c.shift(1)) #
-    
-    # 2. Sum the Geometric Components (Trig Sum)
-    trig_sum = 0
-    for i in range(1, 5):
-        trig_sum += df[f'cos_θ{i}'] + df[f'sin_θ{i}'] #
-        
-    # 3. Compute W(t) using lagged values (t-1)
-    # rp.shift(1) is the only component that dictates the initial sign.
-    df['W'] = rp.shift(1) * df['S'].shift(1) * trig_sum.shift(1) #
-    
-    df.dropna(subset=['W'], inplace=True)
-    return df
-
-def add_wavelets_differences(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Calculates the Wavelet Difference Wd(t) = W(t) - W(t-1).
-    This is the target for the Wavelet Difference Forecast model.
-    """
-    if 'W' not in df.columns:
-        df = add_wavelets(df)
-        
-    df['Wd'] = df['W'] - df['W'].shift(1) #
-    df.dropna(subset=['Wd'], inplace=True)
-    return df
-
-import pandas as pd
 import numpy as np
+import pandas as pd
 
-def add_bar_inbalance(df: pd.DataFrame, lookback_periods) -> pd.DataFrame:
+def add_scrodinger_gauge(historical_data):
     """
-    Calculates the Balance Rule b(t) and Time Imbalance Θ(t).
+    Calculates the Schrödinger Gauge (Ö) based on the current price 
+    and the quantum boundary energy levels.
     
-    b(t) = b(t-1) if Δp(t) = 0 else Δp(t)/|Δp(t)|
-    Θ(t) = average of last k balance rules
-    """
-    prices = df['Close']
-    delta_p = prices.diff()
-    k = lookback_periods
-
-    # Initialize b(t) sequence
-    b = np.zeros(len(prices))
-    b[0] = np.sign(prices.iloc[0]) # b(0) is sign(p(0))
+    Formula: Ö(t) = [2*C(t) - (E_high + E_low)] / (E_high - E_low)
     
-    for t in range(1, len(prices)):
-        if delta_p.iloc[t] == 0:
-            b[t] = b[t-1]
-        else:
-            b[t] = delta_p.iloc[t] / abs(delta_p.iloc[t])
-            
-    df['b'] = b
-    # Θ(t) = (Sum of b from t-1 to t-k) / k
-    # We use shift(1) to ensure the imbalance at time t uses data until t-1
-    df['Θ'] = df['b'].shift(1).rolling(window=k).mean()
-    df.dropna(inplace=True)    
-    return df
-
-def add_bar_inbalance_ratio(df: pd.DataFrame, lookback_periods) -> pd.DataFrame:
-    """
-    Calculates the Bar Inbalance Ratio Θr(t).
-    
-    Θr(t) = b(t-1) / Θ(t-1)
-    """
-    # Ensure dependencies exist
-    if 'b' not in df.columns or 'Theta' not in df.columns:
-        df = add_bar_inbalance(df, lookback_periods)
+    Args:
+        historical_data (pd.DataFrame): Dataframe containing 'Close', 
+                                       'E_Low', and 'E_High'.
         
-    df['Θr'] = df['b'].shift(1) / df['Θ'].shift(1)
-    return df
-
-def add_bar_inbalance_difference(df: pd.DataFrame, lookback_periods) -> pd.DataFrame:
+    Returns:
+        pd.DataFrame: Dataframe with the added 'Ö' column.
     """
-    Calculates the Bar Inbalance Difference Θd(t).
+    df = historical_data
     
-    Θd(t) = 2 * (Θ(t-1) - Θ(t-2)) / (Θ(t-1) + Θ(t-2))
-    """
-    if 'Θ' not in df.columns:
-        df = add_bar_inbalance(df, lookback_periods)
-        
-    t_m1 = df['Θ'].shift(1)
-    t_m2 = df['Θ'].shift(2)
+    # Extract components
+    c = df['Close'].values
+    e_low = df['E_Low'].values
+    e_high = df['E_High'].values
     
-    df['Θd'] = 2 * (t_m1 - t_m2) / (t_m1 + t_m2)
-    return df
-
-def add_inbalance_aggression_filter(df: pd.DataFrame, lookback_periods) -> pd.DataFrame:
-    epsilon = 1e-5
-    """
-    Calculates the combined Inbalance Aggression Filter Θ+(t).
+    # Calculate the Schrödinger Gauge
+    # This centers the price between the boundaries:
+    # Ö = 1.0  at the Upper Boundary (E_High)
+    # Ö = -1.0 at the Lower Boundary (E_Low)
+    # Ö = 0.0  at the equilibrium point
+    numerator = (2 * c) - (e_high + e_low)
+    denominator = e_high - e_low + 1e-9 # Epsilon for stability
     
-    Θ+(t) = Θr(t) * Θd(t)
-    """
-    if 'Θr' not in df.columns:
-        df = add_bar_inbalance_ratio(df, lookback_periods)
-    if 'Θd' not in df.columns:
-        df = add_bar_inbalance_difference(df, lookback_periods)
-        
-    df['Θ+'] = df['Θr'] * df['Θd']
-    df.loc[df['Θ+'].abs() <= epsilon, 'Θ+'] = np.int(0)
+    df['Ö'] = numerator / denominator
+    
+    # Ensure any division by zero or NaN is handled
     df.dropna(inplace=True)
+    
+    return df
+
+def add_scrodinger_gauge_differences(historical_data):
+    """
+    Calculates the Schrödinger Gauge Difference (Öd).
+    
+    Formula: Öd(t) = [Ö(t) - Ö(t-1)] / 2
+    
+    Args:
+        historical_data (pd.DataFrame): Dataframe containing the 'Ö' column.
+        
+    Returns:
+        pd.DataFrame: Dataframe with the added 'Öd' column.
+    """
+    df = historical_data
+    
+    # Extract current and previous gauge values
+    o_curr = df['Ö'].values
+    o_prev = df['Ö'].shift(1).values
+    
+    # Calculate the difference normalized by 2.
+    # Since Ö is bounded [-1, 1], the maximum possible difference is 2.
+    # Dividing by 2 ensures Öd is also bounded within [-1, 1].
+    df['Öd'] = (o_curr - o_prev) / 2.0
+    
+    # Fill the initial NaN resulting from the shift
+    df.dropna(inplace=True)
+    
     return df

@@ -37,21 +37,19 @@ def create_model(k, l2_rate, dropout_rate):
         # --- Hidden Layer 1 ---
         layers.Dense(64, kernel_regularizer=l2_reg, input_shape=input_shape),
         layers.BatchNormalization(), 
-        layers.Activation('relu'),
+        layers.LeakyReLU(alpha=0.1),
         layers.Dropout(dropout_rate), 
         
-        # --- Output Layer ---
-        # Tanh activation for signed output in the range [-1, 1], suitable for Hinge Loss
-        layers.Dense(1, activation='tanh')
+        layers.Dense(1, activation='linear')
     ])
     
-    # Compile the model
-    # CRITICAL CHANGE: Use squared_hinge loss for binary classification with -1/+1 targets.
     model.compile(
         optimizer='adam',
         loss='mse',
-        metrics=['mae'] # We now monitor classification accuracy directly
+        metrics=['mae']
     )
+    return model
+
     
     return model
 
