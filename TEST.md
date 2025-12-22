@@ -15,8 +15,7 @@ It will only execute when the price has reached the breakout point. The breakout
 Reversal trading strategy using support and resistance lines (S & R lines) is exactly the counterpart of breakout trading strategy. Again, a 10% threshold is required to dispatch signal.
 
 # Built Models #
-gauge
-wavelet
 barinbalance
-pricevol
 probdiff
+pricevol
+wavelets
