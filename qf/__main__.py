@@ -23,8 +23,12 @@ base_model_factories = {
     'barinbalance': base.barinbalance
 }
 
-if __name__ == '__main__': # 
 
+if __name__ == '__main__': # 
+    
+    tf.random.set_seed(42)
+    # mkt.import_market_all_data()
+    # exit()
     parser = argparse.ArgumentParser()
     parser.add_argument('trainer', type=str, choices=[key for key in model_trainers.keys()], help='Trainer.')
     parser.add_argument('ticker', type=str, help='Ticker symbol in NYSE')    
@@ -39,4 +43,3 @@ if __name__ == '__main__': #
     args = parser.parse_args()
     trainer = model_trainers[args.trainer]
     trainer(args)
-

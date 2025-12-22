@@ -110,19 +110,14 @@ def add_swing_ratio(historical_data):
     df.dropna(inplace=True)
     return df
 
-def add_directional_probabilities(historical_data):
+def add_directional_probabilities(historical_data, epsilon=9**-5):
     """
     Calculates directional probabilities P↑(t) and P↓(t) based on structural breaches.
     
-    Logic:
-    - Resistance Breach (Gd = 1): Current gap exerts downward pressure.
-    - Support Breach (Gd = -1): Current gap exerts upward pressure.
-    
-    Args:
-        historical_data (pd.DataFrame): Dataframe containing 'S', 'Gd', and 'Close'.
-        
-    Returns:
-        pd.DataFrame: Dataframe with 'P↑' and 'P↓' columns added.
+    This implementation follows the requirements from the README:
+    - Uses the Serial Bounded Ratio δ(x(t)) instead of Squared Serial Difference.
+    - Applies the Logarithmic Filter ρ(x) to the price ratio.
+    - Ensures probabilities are complementary where P↑(t) + P↓(t) = 1 (when δ=1).
     """
     df = historical_data
     n = len(df)
@@ -131,39 +126,51 @@ def add_directional_probabilities(historical_data):
     p_up = np.zeros(n)
     p_down = np.zeros(n)
     
-    # 1. Calculate Bounded Percentage Difference for Close prices: Δc(t)
-    # Formula: (c(t) - c(t-1)) / (|c(t)| + |c(t-1)|)
+    # 1. Define Logarithmic Filter ρ(x)
+    # ρ(x) = (2 / log 2) * (log(1+x) / (1+x))
+    def rho(x):
+        return (2 / np.log(2)) * (np.log(1 + x) / (1 + x))
+
+    # 2. Calculate Serial Bounded Ratio δ(c(t))
+    # δ(c(t)) = ρ(max(c(t)/c(t-1), ε))
     c = df['Close'].values
     c_prev = df['Close'].shift(1).values
     
-    delta_c = (c - c_prev) / (np.abs(c) + np.abs(c_prev))
+    # The README specifies a strictly positive time series for the ratio
+    # np.maximum ensures the ratio is at least ε to prevent log(0) errors
+    raw_ratio = c / (c_prev + 1e-9) 
+    bounded_input = np.maximum(raw_ratio, epsilon)
     
-    # 2. Calculate Squared Serial Difference: Δ²c(t)
-    delta_c_sq = np.square(delta_c)
-    
+    # Apply the logarithmic filter to calculate δ(c(t))
+    # We clip the input to 1.0 as the filter domain is x ∈ (ε, 1]
+    delta_ct = rho(np.minimum(bounded_input, 1.0)) 
+
+    # 3. Apply Probability Mapping based on Breach Case
     for t in range(1, n):
-        st = df['S'].iloc[t]
-        gd = df['Gd'].iloc[t]
-        sq_diff = delta_c_sq[t]
+        st = df['S'].iloc[t]   # Swing Ratio (Bounded [0, 1])
+        gd = df['Gd'].iloc[t]  # Breach Direction (1: Resistance, -1: Support)
+        d_val = delta_ct[t]    # Serial Bounded Ratio
         
-        # Support Breach Case (Ascending Trend Violation)
-        if gd == -1:
-            p_up[t] = min(1.0, st * sq_diff)
-            p_down[t] = 1.0 - st
-            
         # Resistance Breach Case (Descending Trend Violation)
-        elif gd == 1:
-            p_down[t] = min(1.0, st * sq_diff)
+        # Current gap exerts downward pressure
+        if gd == 1:
+            p_down[t] = st * d_val
             p_up[t] = 1.0 - st
             
-        # Default case (no breach history)
+        # Support Breach Case (Ascending Trend Violation)
+        # Current gap exerts upward pressure
+        elif gd == -1:
+            p_up[t] = st * d_val
+            p_down[t] = 1.0 - st
+            
+        # Default/Equilibrium state (No breach history)
         else:
             p_up[t] = 0.5
             p_down[t] = 0.5
             
     df['P↑'] = p_up
     df['P↓'] = p_down
-    df.dropna(inplace=True)
+    
     return df
 
 
@@ -342,55 +349,67 @@ def add_wavelets(historical_data):
     df.dropna(inplace=True)
     return df
 
-def add_bar_inbalance_ratio_and_difference(historical_data, k=14):
+def add_bar_inbalance(historical_data):
     """
-    Calculates Bar Inbalance Ratio (Br) and Bar Inbalance Difference (Bd).
+    Updates historical_data in place with 'I', 'Im', and 'Id'.
     
-    Args:
-        historical_data (pd.DataFrame): Dataframe containing 'Close'.
-        k (int): Lookback window for the time inbalance B(t). Default is 14.
-        
-    Returns:
-        pd.DataFrame: Dataframe with 'Br' and 'Bd' columns added.
+    Logic per README.md:
+    1. b(t): Balance Rule (sgn of price change or persistence).
+    2. I(t): Time Inbalance (Cumulative sum of b(t)).
+    3. Im(t): Inbalance Momentum = Δ( c(t-1) * Δ(I(t-1)) ).
+    4. Id(t): Inbalance Difference = [Im(t-1) - Im(t-2)] / 2.
     """
     df = historical_data
-    n = len(df)
-    
-    # 1. Calculate the balance sequence b(t)
-    # b(t) = b(t-1) if Δp(t) == 0, else sgn(Δp(t))
     prices = df['Close'].values
-    delta_p = np.diff(prices, prepend=prices[0])
+    n = len(prices)
     
+    # --- 1. Calculate Balance Rule b(t) ---
+    # b(t) = b(t-1) if p(t)-p(t-1)==0, else sgn(p(t)-p(t-1))
     b = np.zeros(n)
-    # Initial value b(0) is sgn(p(0))
-    b[0] = 1 if prices[0] >= 0 else -1
+    b[0] = np.sign(prices[0]) if prices[0] != 0 else 1.0
     
     for t in range(1, n):
-        if delta_p[t] == 0:
+        diff = prices[t] - prices[t-1]
+        if diff == 0:
             b[t] = b[t-1]
         else:
-            # sgn(Δp(t)) = |Δp(t)| / Δp(t)
-            b[t] = np.sign(delta_p[t])
+            b[t] = np.sign(diff)
             
-    # 2. Calculate Time Inbalance B(t)
-    # B(t) = (sum of b(t-i) for i=1 to k) / k
-    # We use a rolling mean shifted by 1 to represent the sum of previous k elements
-    b_series = pd.Series(b)
-    B_t = b_series.rolling(window=k).mean().shift(1).fillna(0).values
+    # --- 2. Calculate Bar Inbalance I(t) ---
+    # Cumulative sum of directional signs
+    df['I'] = np.cumsum(b)
     
-    # 3. Calculate Bar Inbalance Ratio Br(t)
-    # Br(t) = b(t) / (1 + B(t)^2)
-    br = b / (1 + np.square(B_t))
+    # --- 3. Calculate Bar Inbalance Momentum Im(t) ---
+    # Im(t) = Δ( c(t-1) * Δ(I(t-1)) )
     
-    # 4. Calculate Bar Inbalance Difference Bd(t)
-    # Bd(t) = ΔB(t) = Bounded percentage difference of B(t) (k=1)
-    # Note: Using the utility function Δ% defined in the README
-    B_t_prev = pd.Series(B_t).shift(1).values
-    bd = (B_t - B_t_prev) / (np.abs(B_t) + np.abs(B_t_prev) + 1e-9)
+    # Utility: Δ(x(t)) = (x(t) - x(t-1)) / (|x(t)| + |x(t-1)| + eps)
+    def get_serial_diff(series):
+        curr = series
+        prev = series.shift(1)
+        return (curr - prev) / (np.abs(curr) + np.abs(prev) + 1e-9)
+
+    # Step A: Δ(I(t))
+    delta_i = get_serial_diff(df['I'])
     
-    df['Br'] = br
-    df['Bd'] = bd # Handle division by zero/NaN
-    df.dropna(inplace=True)
+    # Step B: c(t) * Δ(I(t))
+    composite = df['Close'] * delta_i
+    
+    # Step C: Im(t) = Δ( Composite(t-1) )
+    # Note the shift(1) to satisfy Im(t) = Δ(...(t-1))
+    comp_t_minus_1 = composite.shift(1)
+    df['Im'] = get_serial_diff(comp_t_minus_1)
+    
+    # --- 4. Calculate Bar Inbalance Difference Id(t) ---
+    # Id(τ) = [Im(τ-1) - Im(τ-2)] / 2
+    im_t_minus_1 = df['Im'].shift(1)
+    im_t_minus_2 = df['Im'].shift(2)
+    
+    # Division by 2 scales the [-2, 2] range to [-1, 1]
+    df['Id'] = (im_t_minus_1 - im_t_minus_2) / 2
+    
+    # Clean up NaNs from lookbacks to ensure model compatibility
+    df[['Im', 'Id']] = df[['Im', 'Id']].fillna(0.0)
+    
     return df
 
 def add_probability_differences(historical_data):
@@ -405,7 +424,7 @@ def add_probability_differences(historical_data):
     Returns:
         pd.DataFrame: Dataframe with the 'Pd' column added.
     """
-    df = historical_data.copy()
+    df = historical_data
     
     # Calculate the net difference
     # P↑: Likelihood of upward move
@@ -477,38 +496,7 @@ def add_wavelet_differences(historical_data):
     
     return df
 
-def add_inbalance_agression_filter(historical_data):
-    """
-    Calculates the Inbalance Aggression Filter (B+).
-    
-    Formula: B+(t) = Br(t) * |Bd(t)|
-    Where:
-        Br(t) = Bar Inbalance Ratio
-        Bd(t) = Bar Inbalance Difference
-        
-    Args:
-        historical_data (pd.DataFrame): Dataframe containing 'Br' and 'Bd'.
-        
-    Returns:
-        pd.DataFrame: Dataframe with added 'B+' column.
-    """
-    df = historical_data.copy()
-    
-    # Extract previously calculated components
-    # Br(t): Current directional inbalance ratio [-1, 1]
-    # Bd(t): Velocity of time-inbalance change [-1, 1]
-    br = df['Br'].values
-    bd = df['Bd'].values
-    
-    # Calculate B+: Captures aggressive directional shifts
-    # Using the absolute value of Bd ensures the sign of B+ 
-    # always matches the direction of the imbalance (Br).
-    df['B+'] = br * np.abs(bd)
-    
-    # Handle potential NaNs from early lookbacks
-    df.dropna(inplace=True)
-    
-    return df
+
 
 def add_boundary_energy_levels(historical_data: pd.DataFrame, quantization_level: int = 1e2):
     """

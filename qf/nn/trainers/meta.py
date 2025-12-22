@@ -53,7 +53,7 @@ def get_limits(close_t, energy_levels, direction, risk_pct=0.01):
     reward_dollars = max(risk_dollars * 3, reward_dollars)
     return risk_dollars, reward_dollars
 
-def train_and_test_ensemble(base_models, data, thresholds, meta_config):
+def train_and_test_sgd_ensemble(base_models, data, thresholds, meta_config):
     """
     Adaptive Meta Model (V3 Production).
     Configurable via meta_config to manage non-normal distribution risks.
@@ -127,6 +127,9 @@ def train_and_test_ensemble(base_models, data, thresholds, meta_config):
         meta_model.partial_fit(x_today, [actual_day_return])
 
     return test_data, results, meta_model
+
+def train_and_test_linear_ensemble(base_models, data, thresholds, meta_config):
+    pass
 
 #---
 def load_base_models(ticker):

@@ -20,9 +20,23 @@ $Δ(x(t), k) = Δ_\%(x(t-k), x(t))$ where $k$ is a non-negative integer.
 
 $Δ^2(x(t), k) = [Δ(x(t), k)]^2$
 
+
+### Logaritmic filter ###
+
+ $ρ(x) = \frac{2}{\log{2}} \frac{\log(1+x)}{1+x}$ where,
+ 
+ $x \in (ε,1]$ and 
+ 
+ $ε = 9^{-5}$.
+
+### Serial Bounded Ratio ###
+
+Consider two elements $x(t)$ and $x(t-k)$ from strictly positive time series $x$ where $t$ is the time index. The **serial bounded ratio** $δ(x(t), k)$ from $t$ backwards to $t-k$ is
+
+$δ(x(t), k) = ρ(\max(\frac{x(t)}{x(t-k)}, ε))$
 ---
 
-if $k = 1$ we can rewrite serial difference and squared serial difference as $Δ(x(t))$ and $Δ^2(x(t))$ respectively.
+if $k = 1$ we can rewrite serial difference, squared serial difference and serial bounded ratio as $Δ(x(t))$, $Δ^2(x(t))$ and $δ(x(t))$ respectively.
 
 
 ## The Breaking Gap ##
@@ -69,13 +83,13 @@ The mapping of S(t) to these probabilities depends on whether the last structura
 
 If the last structural breach G_b was a **resistance breach**, the current gap exerts downward pressure:
 
-* $P_↓(t) = \min\{1, S(t)⋅Δ^2c(t)\}$
+* $P_↓(t) = S(t)⋅δ(x(t))$
 * $P_↑(t) = 1 - S(t)$
 
 ### Support Breach Case (Ascending Trend Violation) ###
 If the last structural breach G_b was a **support breach**, the current gap exerts upward pressure:
 
-* $P_↑(t) = \min\{1, S(t)⋅Δ^2(t)\}$
+* $P_↑(t) = S(t)⋅δ(x(t))$
 * $P_↓(t) = 1 - S(t)$
 
 
@@ -153,26 +167,24 @@ defines a sequence $\{b(t)\}_{t=1,...,T}$ where
 $
 b(t) = 
 \begin{cases}
-    b(t-1) & \text{if } Δp(t) = 0 \\
-    \frac {|Δp(t)|}{Δp(t)} & \text{if } Δp(t) \ne 0 \\
+    b(t-1) & \text{if } p(t) - p(t-1) = 0 \\
+    \mathbf {sgn} (p(t) - p(t-1)) & \text{if } p(t) - p(t-1) \ne 0 \\
 \end{cases}
 $
 
-with $b(t) \in \{-1, 1\}$ and $b(0)$ is $\mathbf {sgn}(p(0))$. Then we define the time inbalance at time $t$ as
+with $b(t) \in \{-1, 1\}$ and $b(0)$ is $\mathbf {sgn}(p(0))$. Then we define the **bar inbalance** at time $t$ ($I(t)$) as the cumulative sum of all directional signs ($b(t)$) from the beginning of the sequence.
 
-$B(t) = \frac{\sum^{k}_{i=1} b(t-i)}{k} $
+### Bar Inbalance Momemtum ###
 
-### Bar Inbalance Ratio ###
+The **bar inbalance momentum $I_m(t)$** is defined as
 
-The **bar inbalance ratio $B_r(t)$** is defined as
-
-$B_r(t) = \frac{b(t)}{1+B^2(t)}$.
+$I_m(t) =  Δ(c(t-1) Δ(I(t-1))) $.
 
 ### Bar Inbalance Difference ###
 
-The **bar inbalance Difference $B_d(t)$** is defined as
+The **bar inbalance difference $I_d(τ)$** is defined as
 
-$B_d(t) = ΔB(t)$.
+$I_d(τ) = \frac{I_m(τ-1) - I_m(τ-2)}{2}$
 
 ## Baseline Forecast Models ##
 
@@ -230,19 +242,17 @@ A sequence containing past $k$ wavelet differences: $W_d(τ-1)$, $W_d(τ-2)$, ..
 
 Wavelet difference $W_d(τ)$ at time $τ$.
 
-### Inbalance Agression Filter Forecast ###
+### Bar Inbalance Difference Forecast###
 
-We want to forecast **inbalance agression filter** $B^{+}(τ)$ at time $τ$. The **inbalance agression filter** is defined as
-
-$B^{+}(τ) = \frac {B_r(τ) B_d(τ)}{2}$
+We want to forecast **bar inbalance difference** $I_d(τ)$ at time $τ$.
 
 #### Input Features ####
 
-A sequence containing past $k$ bar inbalance filter: $B^{+}(τ-1)$, $B^{+}(τ-2)$, ..., $B^{+}(τ-k)$.
+A sequence containing past $k$ bar inbalance differences $I_d(τ-1),..., I_d(τ-k)$.
 
 #### Prediction Target ####
 
-Bar inbalance ratio $B^{+}(τ)$ at time $τ$.
+The inbalance difference $I_d(τ)$ at time $τ$.
 
 ## Quantum Mechanics and Finance ##
 
@@ -396,8 +406,6 @@ For discussion simplicity we will represent base model targets as indicated in t
 |------------|-------------|
 | $X_p(t-1)$ | Probability Difference Forecast at time $t-1$|
 | $X_w(t-1)$ | Wavelet Difference Forecast at time $t-1$|
-| $X_b(t-1)$ | Inbalance Agression Filter Forecast at time $t-1$|
+| $X_b(t-1)$ | Bar Inbalance Difference Forecast at time $t-1$|
 | $X_g(t-1)$ | Schrödinger Gauge Difference Forecast at time $t-1$|
 | $X_v(t-1)$ | Price-Volume Difference Forecast at time $t-1$|
-
-

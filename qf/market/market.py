@@ -4,7 +4,7 @@ import os
 import re
 
 from qf import context
-from qf.market.augmentation import add_bar_inbalance_ratio_and_difference, add_boundary_energy_levels, add_breaking_gap, add_directional_probabilities, add_price_time_angles, add_price_volume_differences, add_price_volume_oscillator, add_probability_differences, add_scrodinger_gauge, add_scrodinger_gauge_differences, add_swing_ratio, add_wavelet_differences, add_wavelets
+from qf.market.augmentation import add_bar_inbalance, add_boundary_energy_levels, add_breaking_gap, add_directional_probabilities, add_price_time_angles, add_price_volume_differences, add_price_volume_oscillator, add_probability_differences, add_scrodinger_gauge, add_scrodinger_gauge_differences, add_swing_ratio, add_wavelet_differences, add_wavelets
 base_meta_border = 0.80
 
 def read_csv(path):
@@ -44,13 +44,13 @@ def import_market_data(symbol, lookback_periods = 14):
         add_price_volume_oscillator(historical_data)
         add_price_time_angles(historical_data)
         add_wavelets(historical_data)
-        add_bar_inbalance_ratio_and_difference(historical_data, lookback_periods)
         add_price_volume_differences(historical_data)
         add_probability_differences(historical_data)
         add_wavelet_differences(historical_data)
         add_boundary_energy_levels(historical_data)
         add_scrodinger_gauge(historical_data)
         add_scrodinger_gauge_differences(historical_data)
+        add_bar_inbalance(historical_data)
 
         historical_data.to_csv(output_path)
     else:
@@ -72,6 +72,9 @@ def import_market_all_data():
             import_market_data(symbol)
             print(f"Data for {symbol} imported successfully.")
         except Exception as e:
+            output_path = os.path.join(module_dir, 'data', f"{symbol}.csv")
+            if os.path.exists(output_path):
+                os.remove(output_path)
             print(f"Failed to import data for {symbol}: {e}")
 
 def read_datasets(symbol):
