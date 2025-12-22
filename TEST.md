@@ -19,3 +19,4 @@ barinbalance
 probdiff
 pricevol
 wavelets
+pricevol
