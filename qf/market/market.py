@@ -15,11 +15,10 @@ def remove_timezone_from_json_dates(file_path):
     if not os.path.exists(file_path):
         print(f"File not found: {file_path}")
         return
-
+    print(f"Removing timezone from file: {file_path}")
     with open(file_path, 'r') as f:
         source = f.read()
-        modified = re.sub(r'(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})(?:(?:\+|-)\d{2}:\d{2})', r'\1', source)
-
+        modified = re.sub(r'\d{2}:\d{2}:\d{2}.\d{2}:\d{2}\s*', '', source) # 2015-12-23 00:00:00+00:00        
     with open(file_path, 'w') as f:
         f.writelines(modified)
 
@@ -31,13 +30,14 @@ def import_market_data(symbol, lookback_periods = 14):
 
     if not os.path.exists(data_dir):
         os.makedirs(data_dir)
-
+   
     if not os.path.exists(output_path):
         ticker = yf.Ticker(symbol)        
         historical_data = ticker.history(period="10y", interval="1d")  
         historical_data.to_csv(output_path)        
-        
+        remove_timezone_from_json_dates(output_path)
         historical_data = read_csv(output_path)
+
         add_breaking_gap(historical_data, 0.01)
         add_swing_ratio(historical_data)
         add_directional_probabilities(historical_data)
@@ -51,11 +51,8 @@ def import_market_data(symbol, lookback_periods = 14):
         add_scrodinger_gauge(historical_data)
         add_scrodinger_gauge_differences(historical_data)
         add_bar_inbalance(historical_data)
-
         historical_data.to_csv(output_path)
-    else:
-        historical_data = read_csv(output_path)
-        remove_timezone_from_json_dates(output_path)
+        
     return read_csv(output_path)
 
 

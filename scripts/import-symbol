@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+SCRIPT_DIR=$(dirname "$(readlink -f "$0")")
+DATA_DIR="${SCRIPT_DIR}/../qf/market/data"
+MODELS=('probdiff' 'pricevol' 'wavelets' 'gauge' 'barinbalance')
+LISTING=$1
+
+if [ ! -f $LISTING ]
+then
+    echo "usage: input-symbol <TICKER>"
+    exit 1
+fi
+
+
+for MODEL in "${MODELS[@]}"; do
+    for SYMBOL in $(cat $LISTING); do
+        FILE="${DATA_DIR}/${SYMBOL}.csv"
+
+        if [ -f $FILE ]
+        then
+            rm $FILE
+        fi
+
+        python3 -m qf base $SYMBOL --model $MODEL
+         
+        exit -1
+    done
+    
+done
