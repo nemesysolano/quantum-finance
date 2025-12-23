@@ -20,3 +20,8 @@ probdiff
 pricevol
 wavelets
 pricevol
+
+
+|AAPL|nan|1.0000|0.5054|0.4946|
+|BAC|nan|1.0014|0.5047|0.4953|
+|GOOG|nan|1.0007|0.4980|0.5020|

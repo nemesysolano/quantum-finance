@@ -178,13 +178,21 @@ with $b(t) \in \{-1, 1\}$ and $b(0)$ is $\mathbf {sgn}(p(0))$. Then we define th
 
 The **bar inbalance momentum $I_m(t)$** is defined as
 
-$I_m(t) =  Δ(c(t-1) Δ(I(t-1))) $.
+$I_m(t) = δ(c(t-1)) \cdot Δ(I(t-1))$,
+
+Where:
+* $c(t-1)$ is the closing price.
+* $I(t-1)$ is the Bar Inbalance (Cumulative sum of the Balance Rule $b$).
+* $δ$ is the **Serial Bounded Ratio**.
+* $Δ$ is the **Serial Difference**.
+
 
 ### Bar Inbalance Difference ###
 
 The **bar inbalance difference $I_d(τ)$** is defined as
 
 $I_d(τ) = \frac{I_m(τ-1) - I_m(τ-2)}{2}$
+
 
 ## Baseline Forecast Models ##
 

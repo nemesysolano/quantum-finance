@@ -351,63 +351,60 @@ def add_wavelets(historical_data):
 
 def add_bar_inbalance(historical_data):
     """
-    Updates historical_data in place with 'I', 'Im', and 'Id'.
-    
-    Logic per README.md:
-    1. b(t): Balance Rule (sgn of price change or persistence).
-    2. I(t): Time Inbalance (Cumulative sum of b(t)).
-    3. Im(t): Inbalance Momentum = Δ( c(t-1) * Δ(I(t-1)) ).
-    4. Id(t): Inbalance Difference = [Im(t-1) - Im(t-2)] / 2.
+    Price-Neutral Bar Inbalance logic.
+    Addresses missed breakouts in ABT/NSC by using price velocity (delta) 
+    instead of price level (c).
     """
     df = historical_data
     prices = df['Close'].values
     n = len(prices)
     
     # --- 1. Calculate Balance Rule b(t) ---
-    # b(t) = b(t-1) if p(t)-p(t-1)==0, else sgn(p(t)-p(t-1))
     b = np.zeros(n)
     b[0] = np.sign(prices[0]) if prices[0] != 0 else 1.0
-    
     for t in range(1, n):
         diff = prices[t] - prices[t-1]
-        if diff == 0:
-            b[t] = b[t-1]
-        else:
-            b[t] = np.sign(diff)
+        b[t] = np.sign(diff) if diff != 0 else b[t-1]
             
-    # --- 2. Calculate Bar Inbalance I(t) ---
-    # Cumulative sum of directional signs
+    # --- 2. Calculate Time Inbalance I(t) ---
     df['I'] = np.cumsum(b)
     
-    # --- 3. Calculate Bar Inbalance Momentum Im(t) ---
-    # Im(t) = Δ( c(t-1) * Δ(I(t-1)) )
-    
-    # Utility: Δ(x(t)) = (x(t) - x(t-1)) / (|x(t)| + |x(t-1)| + eps)
+    # Utility: Serial Difference Δ
     def get_serial_diff(series):
         curr = series
         prev = series.shift(1)
         return (curr - prev) / (np.abs(curr) + np.abs(prev) + 1e-9)
 
-    # Step A: Δ(I(t))
-    delta_i = get_serial_diff(df['I'])
+    # Utility: Logarithmic filter ρ
+    def rho(x):
+        return (2.0 / np.log(2.0)) * (np.log(1.0 + x) / (1.0 + x))
     
-    # Step B: c(t) * Δ(I(t))
-    composite = df['Close'] * delta_i
+    # Utility: Serial Bounded Ratio δ
+    def get_delta(series):
+        eps = 9**-5
+        s_prev = series.shift(1).replace(0, eps)
+        ratio = series / s_prev
+        ratio = np.maximum(ratio, eps)
+        return rho(ratio)
+
+    # --- 3. Calculate Bar Inbalance Momentum Im(t) ---
+    # Price Conviction δ(c(t-1), 1) available at start of bar t
+    price_conviction = get_delta(df['Close']).shift(1)
     
-    # Step C: Im(t) = Δ( Composite(t-1) )
-    # Note the shift(1) to satisfy Im(t) = Δ(...(t-1))
-    comp_t_minus_1 = composite.shift(1)
-    df['Im'] = get_serial_diff(comp_t_minus_1)
+    # Structural Change Δ(I(t-1), 1) available at start of bar t
+    structural_change = get_serial_diff(df['I']).shift(1)
+    
+    # Momentum is the conviction-weighted structural shift
+    df['Im'] = price_conviction * structural_change
     
     # --- 4. Calculate Bar Inbalance Difference Id(t) ---
     # Id(τ) = [Im(τ-1) - Im(τ-2)] / 2
-    im_t_minus_1 = df['Im'].shift(1)
-    im_t_minus_2 = df['Im'].shift(2)
+    im_prev1 = df['Im'].shift(1)
+    im_prev2 = df['Im'].shift(2)
     
-    # Division by 2 scales the [-2, 2] range to [-1, 1]
-    df['Id'] = (im_t_minus_1 - im_t_minus_2) / 2
+    df['Id'] = (im_prev1 - im_prev2) / 2
     
-    # Clean up NaNs from lookbacks to ensure model compatibility
+    # Cleanup to prevent NaN errors in Neural Network
     df[['Im', 'Id']] = df[['Im', 'Id']].fillna(0.0)
     
     return df
