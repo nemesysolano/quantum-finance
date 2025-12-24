@@ -193,6 +193,36 @@ The **bar inbalance difference $I_d(τ)$** is defined as
 
 $I_d(τ) = \frac{I_m(τ-1) - I_m(τ-2)}{2}$
 
+## Fractional Differentation ##
+
+A time series has memory when future values are related to past observations. In order to perform inferential analyses, researchers need to work
+with invariant processes, such as returns on prices (or changes in log-prices), changes in yield, or changes in volatility. Invariance is often achieved via data transformations
+that make the series stationary, at the expense of removing all memory from the original series.
+
+Although stationarity is a necessary property for inferential purposes, it is rarely the case in signal processing that we wish
+all memory to be erased, as that memory is the basis for the model’s predictive power.
+
+The dilemma is that _returns are stationary, however memory-less, and prices have memory, however they are non-stationary_. The question arises: _What
+is the minimum amount of differentiation that makes a price series stationary while preserving as much memory as possible?_ 
+
+### Differentiated Time Series ###
+
+Let's consider the $X=\{x(1), x(2),..., x(t),...\}$ time series representing an stochastic prices. We can derive a new time series 
+$\hat X=\{\hat x(1), \hat x(2),..., \hat x(t),...\}$ which is both stationary and memory-preserving.
+
+$\hat x(t) = \sum^k_{i=0}w_i x(t-i)$ where
+
+$w_i = w_{i-1} \frac{d-i+1}{i}$ and $d$ is non negative.
+
+The $\hat X$ time series will be called **differentiated time series** Let's comment on some corner cases
+
+* **$d = 0$**: For $d=0$, all weights $w_i$ are 0 except for $w_0=1$. That is the case where the differentiated series coincides with the original one.
+* **$d = 1$**: For $d=1$, all weights $w_i$ are 0 except for $w_0=1$ and $w_1=-1$. That is the standard first-order integer differentiation, which is used to derive log-price returns.
+* Anywhere in between the above two cases, all weights after $w_0=1$ are negative and greater than $−1$
+* **$k > d + 1$**: For $k > d + 1$, $w_i$ will be negative if $⌊d⌋$ is even,and positive otherwise.
+
+
+
 
 ## Baseline Forecast Models ##
 

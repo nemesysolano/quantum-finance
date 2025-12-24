@@ -8,7 +8,7 @@ import qf.nn.models.base as base
 import qf.nn as nn
 import tensorflow as tf
 import argparse
-
+import sys
 
 model_trainers = {
     'base': base_trainer,
@@ -25,10 +25,11 @@ base_model_factories = {
 
 
 if __name__ == '__main__': # 
-    
+    if sys.argv[1] == 'import':
+        mkt.import_market_all_data()
+        exit()
+
     tf.random.set_seed(42)
-    # mkt.import_market_all_data()
-    # exit()
     parser = argparse.ArgumentParser()
     parser.add_argument('trainer', type=str, choices=[key for key in model_trainers.keys()], help='Trainer.')
     parser.add_argument('ticker', type=str, help='Ticker symbol in NYSE')    
