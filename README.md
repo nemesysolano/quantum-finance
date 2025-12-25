@@ -280,7 +280,7 @@ A sequence containing past $k$ wavelet differences: $W_d(τ-1)$, $W_d(τ-2)$, ..
 
 Wavelet difference $W_d(τ)$ at time $τ$.
 
-### Bar Inbalance Difference Forecast###
+### Bar Inbalance Difference Forecast ###
 
 We want to forecast **bar inbalance difference** $I_d(τ)$ at time $τ$.
 
