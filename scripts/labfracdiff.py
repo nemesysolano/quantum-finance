@@ -6,16 +6,36 @@ import sys, os
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 import qf.nn.fracdiff as frac
 
-def report_goodness_of_fit(y_true, y_pred):
+def report_goodness_of_fit(y_true, y_pred, pred_deltas):
+    """
+    Compares the predicted deltas with actual serial differences using the 
+    Bounded Percentage Difference formula: (b-a) / (|a| + |b|)
+    """
     y_true = np.array(y_true)
     y_pred = np.array(y_pred)
-    mae = mean_absolute_error(y_true, y_pred)
-    rmse = np.sqrt(mean_squared_error(y_true, y_pred))
-    r2 = r2_score(y_true, y_pred)
-    sign_match = np.mean(np.sign(y_true) == np.sign(y_pred))
-    log10_diff = np.min(np.log10(np.abs(y_true - y_pred)))
+    pred_deltas = np.array(pred_deltas)
+
+    # 1. Calculate Actual Serial Differences (Delta_%)
+    # a = price at t, b = price at t+1
+    a = y_true[:-1]
+    b = y_true[1:]
+    actual_deltas = (b - a) / (np.abs(a) + np.abs(b))
+
+    # 2. Align and compare
+    # y_pred[t] was predicted using pred_deltas[t] to match actual_deltas[t]
+    min_len = min(len(actual_deltas), len(pred_deltas))
+    target = actual_deltas[:min_len]
+    signal = pred_deltas[:min_len]
+
+    delta_mae = mean_absolute_error(target, signal)
     
-    return {"mae": mae, "rmse": rmse, "r2": r2, "sign_match": sign_match, "log10_diff": log10_diff}
+    sign_match = np.mean(np.sign(target) == np.sign(signal))
+
+    # Traditional price-space metrics
+    mae = mean_absolute_error(y_true[1:min_len+1], y_pred[:min_len])
+    rmse = np.sqrt(mean_squared_error(y_true[1:min_len+1], y_pred[:min_len]))
+    
+    return {"mae": mae, "rmse": rmse, "sign_match": sign_match, "delta_mae": delta_mae}
 
 def create_targets(historical_data, k):
     """Returns the actual closing prices for the target steps (t+1)."""
@@ -183,8 +203,8 @@ def back_test(params):
     n = len(y_preds)
     assert len(pred_deltas) == n
     assert len(y_actual) == n + 1
-    actual_deltas = None
-    goodness = report_goodness_of_fit(y_actual[:n], y_preds)
+ 
+    goodness = report_goodness_of_fit(y_actual[:n], y_preds, pred_deltas)
     
     # FIX: Remove d_history and align h_tar/l_tar correctly
     equity, final, longs, shorts = simulate_trading(
@@ -215,8 +235,8 @@ if __name__ == '__main__':
     output_file = os.path.join(os.getcwd(), "test-results", f"report-labfracdiff.md")
     os.remove(output_file) if os.path.exists(output_file) else None
     with open(output_file, 'w') as f: #  {"mae": mae, "rmse": rmse, "r2": r2, "sign_match": sign_match}
-        print("|Ticker|Initial Capital|Final Capital|Total Return (%)|Max Drawdown (%)|Volatility (per step)|Sharpe Ratio|Number of Steps|Peak Equity|Final Drawdown|Long Trades|Short Trade|MAE|RMSE|R2|Sign Match|Log10 Diff|", file=f)
-        print("|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|", file=f)
+        print("|Ticker|Initial Capital|Final Capital|Total Return (%)|Max Drawdown (%)|Volatility (per step)|Sharpe Ratio|Number of Steps|Peak Equity|Final Drawdown|Long Trades|Short Trade|Delta MAE|", file=f)
+        print("|---|---|---|---|---|---|---|---|---|---|---|---|---|", file=f)
     
         for result in results:    
             if result is None:
@@ -224,4 +244,4 @@ if __name__ == '__main__':
             
             stats = result['stats']
             goodness = result['goodness']
-            print(f"|{stats['Ticker']}|{stats['Initial Capital']:.2f}|{stats['Final Capital']:.2f}|{stats['Total Return (%)']:.2f}|{stats['Max Drawdown (%)']:.2f}|{stats['Volatility (per step)']:.4f}|{stats['Sharpe Ratio']:.4f}|{stats['Number of Steps']}|{stats['Peak Equity']:.2f}|{stats['Final Drawdown (%)']:.2f}|{stats['Long Trades']}|{stats['Short Trades']}|{goodness['mae']:.4f}|{goodness['rmse']:.4f}|{goodness['r2']:.4f}|{goodness['sign_match']:.4f}|{goodness['log10_diff']:.4f}|", file=f)
+            print(f"|{stats['Ticker']}|{stats['Initial Capital']:.2f}|{stats['Final Capital']:.2f}|{stats['Total Return (%)']:.2f}|{stats['Max Drawdown (%)']:.2f}|{stats['Volatility (per step)']:.4f}|{stats['Sharpe Ratio']:.4f}|{stats['Number of Steps']}|{stats['Peak Equity']:.2f}|{stats['Final Drawdown (%)']:.2f}|{stats['Long Trades']}|{stats['Short Trades']}|{goodness['delta_mae']:.4f}|", file=f)
