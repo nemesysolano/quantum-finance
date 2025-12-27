@@ -4,6 +4,7 @@ import qf.market as mkt
 import qf.nn.fracdiff as frac
 import sys, os
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
+import qf.nn.fracdiff as frac
 
 def report_goodness_of_fit(y_true, y_pred):
     y_true = np.array(y_true)
@@ -12,8 +13,9 @@ def report_goodness_of_fit(y_true, y_pred):
     rmse = np.sqrt(mean_squared_error(y_true, y_pred))
     r2 = r2_score(y_true, y_pred)
     sign_match = np.mean(np.sign(y_true) == np.sign(y_pred))
- 
-    return {"mae": mae, "rmse": rmse, "r2": r2, "sign_match": sign_match}
+    log10_diff = np.min(np.log10(np.abs(y_true - y_pred)))
+    
+    return {"mae": mae, "rmse": rmse, "r2": r2, "sign_match": sign_match, "log10_diff": log10_diff}
 
 def create_targets(historical_data, k):
     """Returns the actual closing prices for the target steps (t+1)."""
@@ -26,8 +28,8 @@ def create_inputs(historical_data, k):
     h = historical_data['High'].values.flatten()
     l = historical_data['Low'].values.flatten()
     S = historical_data['Ö'].values.flatten()
-    Eh = historical_data['Eh'].values.flatten()
-    El = historical_data['El'].values.flatten()
+    Eh = historical_data['E_High'].values.flatten()
+    El = historical_data['E_Low'].values.flatten()
     
     def delta_p(a, b): return (b - a) / (abs(a) + abs(b))
     
@@ -58,7 +60,7 @@ def create_inputs(historical_data, k):
 
 def estimate_y(diffs, X_tar, raw_anchors, k):
     """Walk-forward estimation of fractional predictions with no target leakage."""
-    y_preds, d_vals = [], []
+    y_preds, d_vals, pred_deltas = [], [], []
     for i in range(len(X_tar)):
         # The feature vector X_tar[i] already ends at diffs[k+i-1] (the diff ending at time t).
         # We fit 'd' using the sequence of diffs prior to this.
@@ -69,49 +71,58 @@ def estimate_y(diffs, X_tar, raw_anchors, k):
         d_hat = frac.perform_ols_and_fit(history_for_d, target_for_d, k)
         
         # Now predict the NEXT move (t to t+1) using the fitted d
-        pred = frac.predict_next_price(X_tar[i], d_hat, k, raw_anchors[i])
+        pred, pred_delta = frac.predict_next_price(X_tar[i], d_hat, k, raw_anchors[i])
         y_preds.append(pred)
         d_vals.append(d_hat)
-    return np.array(y_preds), d_vals
+        pred_deltas.append(pred_delta)
+    return np.array(y_preds), d_vals, pred_deltas
 
-def simulate_trading(y_actual, S_at_t, y_preds, h_target, l_target, energy_high_target, energy_low_target, initial_cap=10000):
+def simulate_trading(y_actual, S_at_t, y_preds, h_target, l_target, e_high, e_low, initial_cap=10000):
     cap = initial_cap
     equity_curve = [cap]
-    longs, shorts = 0, 0
-    
-    # Start from 0 to capture the first prediction
+    shorts = 0
+    longs = 0
     for i in range(len(y_preds) - 1):
-        # price_now is the close at time t
-        price_now = y_actual[i] 
-        # y_preds[i] is the forecast for y_actual[i+1]
+        price_now = y_actual[i]
         expected_move = y_preds[i] - price_now
         tp_dist = abs(expected_move)
-        sl_dist = 0.3 * tp_dist
         
-        # Indicator at time t decides the trade for t+1
-        if expected_move > 0 and S_at_t[i] < 0:
-            tp_price, sl_price = price_now + tp_dist, price_now - sl_dist
-            # Check high/low of the NEXT candle (i+1)
-            if l_target[i+1] <= sl_price:
-                cap *= (sl_price / price_now)
-            elif h_target[i+1] >= tp_price:
-                cap *= (tp_price / price_now)
-            else:
-                cap *= (y_actual[i+1] / price_now)
-            longs += 1
+        # 1. DYNAMIC STOP LOSS: Instead of 0.3 * tp_dist, use the Energy Band distance
+        # as a volatility-adjusted floor/ceiling.
+        sl_dist = min(0.3 * tp_dist, abs(price_now - e_low[i] if expected_move > 0 else e_high[i] - price_now))
+        
+        if expected_move > 0 and S_at_t[i] < 0:  # LONG
+            tp_price = price_now + tp_dist
+            sl_price = price_now - sl_dist
+            longs +=1
+            # QUANTUM GATE: If the low energy band is rising, trail the stop
+            # to the maximum of the hard SL or the current Low Energy Band.
+            dynamic_sl = max(sl_price, e_low[i+1]) 
             
-        elif expected_move < 0 and S_at_t[i] > 0:
-            tp_price, sl_price = price_now - tp_dist, price_now + sl_dist
-            if h_target[i+1] >= sl_price:
-                cap *= (price_now / sl_price)
+            if l_target[i+1] <= dynamic_sl:
+                cap *= (dynamic_sl / price_now) # Quantum Stop Out (Minimized Drawdown)
+            elif h_target[i+1] >= tp_price:
+                cap *= (tp_price / price_now)   # Target Reached
+            else:
+                cap *= (y_actual[i+1] / price_now) # Carry to Close
+
+        elif expected_move < 0 and S_at_t[i] > 0: # SHORT
+            tp_price = price_now - tp_dist
+            sl_price = price_now + sl_dist
+            shorts += 1
+            # QUANTUM GATE: If the high energy band is falling, trail the stop
+            dynamic_sl = min(sl_price, e_high[i+1])
+            
+            if h_target[i+1] >= dynamic_sl:
+                cap *= (price_now / dynamic_sl) # Quantum Stop Out
             elif l_target[i+1] <= tp_price:
-                cap *= (price_now / tp_price)
+                cap *= (price_now / tp_price)   # Target Reached
             else:
                 cap *= (price_now / y_actual[i+1])
-            shorts += 1
-            
+                
         equity_curve.append(cap)
     return equity_curve, cap, longs, shorts
+
 
 def create_backtest_stats(ticker, equity_curve, final_capital, long_trades, short_trades):
     # Ensure 1D array even if input is a list of arrays or 2D matrix
@@ -158,17 +169,21 @@ def create_backtest_stats(ticker, equity_curve, final_capital, long_trades, shor
 
 def back_test(params):
     (k, ticker) = params
+    # try:
     data = mkt.import_market_data(ticker)
-    
+        
     # Generate Inputs and Targets
     X_est, X_tar, S_tar, anchors, h_tar, l_tar, energy_high_target, energy_low_target = create_inputs(data, k)
     y_actual = create_targets(data, k)
     
     # Forecasting
-    y_preds, d_history = estimate_y(X_est, X_tar, anchors, k)
+    y_preds, _, pred_deltas = estimate_y(X_est, X_tar, anchors, k)
     
     # Align to the length of predictions
     n = len(y_preds)
+    assert len(pred_deltas) == n
+    assert len(y_actual) == n + 1
+    actual_deltas = None
     goodness = report_goodness_of_fit(y_actual[:n], y_preds)
     
     # FIX: Remove d_history and align h_tar/l_tar correctly
@@ -177,7 +192,7 @@ def back_test(params):
         S_tar[:n], 
         y_preds, 
         h_tar[:n], 
-        l_tar[:n]
+        l_tar[:n],
         energy_high_target[:n],
         energy_low_target[:n]
     )
@@ -185,7 +200,10 @@ def back_test(params):
     stats = create_backtest_stats(ticker, equity, final, longs, shorts)
     print(f"Finished backtesting for {ticker}")
     return {'stats': stats, 'goodness': goodness}
-
+    # except Exception as cause:
+    #     print(f"failed to backtest {ticker} cause=f{cause}")
+    #     return None
+    
 if __name__ == '__main__':
     tickers_file = sys.argv[1]    
     k = 14
@@ -197,10 +215,13 @@ if __name__ == '__main__':
     output_file = os.path.join(os.getcwd(), "test-results", f"report-labfracdiff.md")
     os.remove(output_file) if os.path.exists(output_file) else None
     with open(output_file, 'w') as f: #  {"mae": mae, "rmse": rmse, "r2": r2, "sign_match": sign_match}
-        print("|Ticker|Initial Capital|Final Capital|Total Return (%)|Max Drawdown (%)|Volatility (per step)|Sharpe Ratio|Number of Steps|Peak Equity|Final Drawdown|Long Trades|Short Trades||MAE|RMSE|R2|Sign Match|", file=f)
+        print("|Ticker|Initial Capital|Final Capital|Total Return (%)|Max Drawdown (%)|Volatility (per step)|Sharpe Ratio|Number of Steps|Peak Equity|Final Drawdown|Long Trades|Short Trade|MAE|RMSE|R2|Sign Match|Log10 Diff|", file=f)
         print("|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|", file=f)
     
         for result in results:    
+            if result is None:
+                continue
+            
             stats = result['stats']
             goodness = result['goodness']
-            print(f"|{stats['Ticker']}|{stats['Initial Capital']:.2f}|{stats['Final Capital']:.2f}|{stats['Total Return (%)']:.2f}|{stats['Max Drawdown (%)']:.2f}|{stats['Volatility (per step)']:.4f}|{stats['Sharpe Ratio']:.4f}|{stats['Number of Steps']}|{stats['Peak Equity']:.2f}|{stats['Final Drawdown (%)']:.2f}|{stats['Long Trades']}|{stats['Short Trades']}||{goodness['mae']:.4f}|{goodness['rmse']:.4f}|{goodness['r2']:.4f}|{goodness['sign_match']:.4f}|", file=f)
+            print(f"|{stats['Ticker']}|{stats['Initial Capital']:.2f}|{stats['Final Capital']:.2f}|{stats['Total Return (%)']:.2f}|{stats['Max Drawdown (%)']:.2f}|{stats['Volatility (per step)']:.4f}|{stats['Sharpe Ratio']:.4f}|{stats['Number of Steps']}|{stats['Peak Equity']:.2f}|{stats['Final Drawdown (%)']:.2f}|{stats['Long Trades']}|{stats['Short Trades']}|{goodness['mae']:.4f}|{goodness['rmse']:.4f}|{goodness['r2']:.4f}|{goodness['sign_match']:.4f}|{goodness['log10_diff']:.4f}|", file=f)

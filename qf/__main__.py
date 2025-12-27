@@ -25,6 +25,7 @@ base_model_factories = {
 
 
 if __name__ == '__main__': # 
+    parser = argparse.ArgumentParser()
     if sys.argv[1] == 'import':
         mkt.import_market_all_data()
         exit()
@@ -41,6 +42,7 @@ if __name__ == '__main__': #
     parser.add_argument('--dropout_rate', type=float, default=0.2, help='Number of epochs with no improvement after which training will be stopped.')
     parser.add_argument('--scale_features', type=str, default='no', choices=['yes', 'no'])
     parser.add_argument('--backtest', type=str, default='sgd', choices=['sgd', 'linear', 'combined'])
+    parser.add_argument("--quantization_level", type=float, default=1e2)
     args = parser.parse_args()
     trainer = model_trainers[args.trainer]
     trainer(args)

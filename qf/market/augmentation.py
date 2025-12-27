@@ -192,6 +192,8 @@ def add_price_volume_oscillator(historical_data):
     df = historical_data
     
     # Extract values
+    # if dataset has no Volume column, exit
+    
     p = df['Close'].values
     v = df['Volume'].values
     
@@ -204,7 +206,7 @@ def add_price_volume_oscillator(historical_data):
     delta_p = (p - p_prev) / (np.abs(p) + np.abs(p_prev))
     
     # 2. Calculate Δv(t): Bounded Percentage Difference of Volume
-    delta_v = (v - v_prev) / (np.abs(v) + np.abs(v_prev))
+    delta_v = 1 if v[0] != 0 else (v - v_prev) / (np.abs(v) + np.abs(v_prev))
     
     # 3. Calculate Δ²v(t): Squared Serial Difference of Volume
     delta_v_sq = np.square(delta_v)
@@ -511,8 +513,6 @@ def add_boundary_energy_levels(historical_data: pd.DataFrame, quantization_level
     historical_data['E_High'] = upper_boundaries(historical_data['High'])
     historical_data.dropna(inplace=True)
 
-import numpy as np
-import pandas as pd
 
 def add_scrodinger_gauge(historical_data):
     """

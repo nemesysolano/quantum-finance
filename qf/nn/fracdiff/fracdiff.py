@@ -2,6 +2,7 @@ import numpy as np
 from sklearn.linear_model import LinearRegression
 from scipy.optimize import curve_fit
 
+
 def get_binomial_weights(d, k):
     """
     Calculates weights w_i: w_i = w_{i-1} * (i - 1 - d) / i | w_1 = -d
@@ -48,4 +49,4 @@ def predict_next_price(window_diffs, d, k, last_raw_price):
     weights = get_binomial_weights(d, k)
     pred_delta = np.clip(np.dot(weights, window_diffs), -0.99, 0.99)
     # Reversing the Bounded Percentage Difference formula
-    return last_raw_price * (1 + pred_delta) / (1 - pred_delta)
+    return last_raw_price * (1 + pred_delta) / (1 - pred_delta), pred_delta
