@@ -207,12 +207,11 @@ is the minimum amount of differentiation that makes a price series stationary wh
 
 ### Differentiated Time Series ###
 
-Let's consider the $X=\{x(1), x(2),..., x(t),...\}$ time series representing an stochastic prices. We can derive a new time series 
-$\hat X=\{\hat x(1), \hat x(2),..., \hat x(t),...\}$ which is both stationary and memory-preserving.
+Let's consider the $X=\{x(1), x(2),..., x(t),...\}$ time series representing an stochastic prices.
 
-$\hat x(t) = \sum^k_{i=0}w_i x(t-i)$ where
+$x(t) = \sum^k_{i=1}w_i x(t-i)$ where
 
-$w_i = w_{i-1} \frac{d-i+1}{i}$ and $d$ is non negative.
+$w_0 = 1$ and $w_i = w_{i-1} \frac {i - 1 - d} {i}$
 
 The $\hat X$ time series will be called **differentiated time series** Let's comment on some corner cases
 
@@ -221,7 +220,43 @@ The $\hat X$ time series will be called **differentiated time series** Let's com
 * Anywhere in between the above two cases, all weights after $w_0=1$ are negative and greater than $−1$
 * **$k > d + 1$**: For $k > d + 1$, $w_i$ will be negative if $⌊d⌋$ is even,and positive otherwise.
 
+#### Estimating $d$ ####
 
+The `estimate_d` function estimates the fractional integration parameter  from a stochastic time series  by leveraging the relationship between **Binomial Coefficients** and **Linear Autoregression**.
+
+##### 1. The Model
+
+We assume the time series  is governed by a fractional process of order , which can be expressed as a linear combination of its past  values:
+
+$x(t) = \sum^k_{i=1}w_ix(t-i)$
+
+where the weights  are defined by the binomial recurrence relation:
+
+$w_1 = 1$
+
+$w_i = w_{i-1} \frac {i - 1 - d} {i}$
+
+##### 2. Step 1: Solving the Linear System
+
+Because the equation is linear with respect to the weights , we use **Ordinary Least Squares (OLS)** regression to find the weight vector  that minimizes the squared error:
+
+$\min_w \|Y-Xw\|^2$
+
+Where  contains the current values  and  is the matrix of lagged observations. This step "extracts" the memory signature from the noisy stochastic data.
+
+##### 3. Step 2: Parameter Extraction (Non-linear Mapping)
+
+Once the empirical weights  are found, we map them back to the single scalar . Since  is embedded non-linearly in higher-order weights, we use the **Levenberg-Marquardt algorithm** (via `curve_fit`) to find the  that best fits the entire weight profile:
+
+$\min_d \sum^k_{i=1}(w_i - \mathbf {Binomial}(d,i))^2$
+
+##### 4. Step 3: Auto-Differencing (Numerical Stability)
+
+To ensure high precision, the function utilizes an **Integer-Stripping** technique.
+
+* If the series is non-stationary ($d ≥ 1$), it calculates on the first-order difference $Δx(t)$.
+* The final result is then reconstructed as $d_{\text {total}}=d_{\text {estimated}} + 1$.
+* This keeps the core math in the stable $(0,1)$  range where the "memory signature" is most distinct from noise.
 
 
 ## Baseline Forecast Models ##
