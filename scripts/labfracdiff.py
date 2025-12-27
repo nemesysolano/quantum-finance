@@ -97,7 +97,7 @@ def estimate_y(diffs, X_tar, raw_anchors, k):
         pred_deltas.append(pred_delta)
     return np.array(y_preds), d_vals, pred_deltas
 
-def simulate_trading(y_actual, S_at_t, y_preds, h_target, l_target, e_high, e_low, initial_cap=10000):
+def simulate_trading(y_actual, S_tar, y_preds, h_target, l_target, e_high, e_low, initial_cap=10000):
     cap = initial_cap
     equity_curve = [cap]
     shorts = 0
@@ -111,7 +111,7 @@ def simulate_trading(y_actual, S_at_t, y_preds, h_target, l_target, e_high, e_lo
         # as a volatility-adjusted floor/ceiling.
         sl_dist = min(0.3 * tp_dist, abs(price_now - e_low[i] if expected_move > 0 else e_high[i] - price_now))
         
-        if expected_move > 0 and S_at_t[i] < 0:  # LONG
+        if expected_move > 0 and S_tar[i] < 0:  # LONG
             tp_price = price_now + tp_dist
             sl_price = price_now - sl_dist
             longs +=1
@@ -126,7 +126,7 @@ def simulate_trading(y_actual, S_at_t, y_preds, h_target, l_target, e_high, e_lo
             else:
                 cap *= (y_actual[i+1] / price_now) # Carry to Close
 
-        elif expected_move < 0 and S_at_t[i] > 0: # SHORT
+        elif expected_move < 0 and S_tar[i] > 0: # SHORT
             tp_price = price_now - tp_dist
             sl_price = price_now + sl_dist
             shorts += 1
@@ -189,40 +189,40 @@ def create_backtest_stats(ticker, equity_curve, final_capital, long_trades, shor
 
 def back_test(params):
     (k, ticker) = params
-    # try:
-    data = mkt.import_market_data(ticker)
+    try:
+        data = mkt.import_market_data(ticker)
+            
+        # Generate Inputs and Targets
+        X_est, X_tar, S_tar, anchors, h_tar, l_tar, energy_high_target, energy_low_target = create_inputs(data, k)
+        y_actual = create_targets(data, k)
         
-    # Generate Inputs and Targets
-    X_est, X_tar, S_tar, anchors, h_tar, l_tar, energy_high_target, energy_low_target = create_inputs(data, k)
-    y_actual = create_targets(data, k)
+        # Forecasting
+        y_preds, _, pred_deltas = estimate_y(X_est, X_tar, anchors, k)
+        
+        # Align to the length of predictions
+        n = len(y_preds)
+        assert len(pred_deltas) == n
+        assert len(y_actual) == n + 1
     
-    # Forecasting
-    y_preds, _, pred_deltas = estimate_y(X_est, X_tar, anchors, k)
-    
-    # Align to the length of predictions
-    n = len(y_preds)
-    assert len(pred_deltas) == n
-    assert len(y_actual) == n + 1
- 
-    goodness = report_goodness_of_fit(y_actual[:n], y_preds, pred_deltas)
-    
-    # FIX: Remove d_history and align h_tar/l_tar correctly
-    equity, final, longs, shorts = simulate_trading(
-        y_actual[:n], 
-        S_tar[:n], 
-        y_preds, 
-        h_tar[:n], 
-        l_tar[:n],
-        energy_high_target[:n],
-        energy_low_target[:n]
-    )
-    
-    stats = create_backtest_stats(ticker, equity, final, longs, shorts)
-    print(f"Finished backtesting for {ticker}")
-    return {'stats': stats, 'goodness': goodness}
-    # except Exception as cause:
-    #     print(f"failed to backtest {ticker} cause=f{cause}")
-    #     return None
+        goodness = report_goodness_of_fit(y_actual[:n], y_preds, pred_deltas)
+        
+        # FIX: Remove d_history and align h_tar/l_tar correctly
+        equity, final, longs, shorts = simulate_trading(
+            y_actual[:n], 
+            S_tar[:n], 
+            y_preds, 
+            h_tar[:n], 
+            l_tar[:n],
+            energy_high_target[:n],
+            energy_low_target[:n]
+        )
+        
+        stats = create_backtest_stats(ticker, equity, final, longs, shorts)
+        print(f"Finished backtesting for {ticker}")
+        return {'stats': stats, 'goodness': goodness}
+    except Exception as cause:
+        print(f"failed to backtest {ticker} cause=f{cause}")
+        return None
     
 if __name__ == '__main__':
     tickers_file = sys.argv[1]    
