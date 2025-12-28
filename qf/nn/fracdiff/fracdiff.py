@@ -2,6 +2,29 @@ import numpy as np
 from sklearn.linear_model import LinearRegression
 from scipy.optimize import curve_fit
 
+# Add to qf/nn/fracdiff.py
+
+def get_atr(y_actual, window=14):
+    """
+    Calculates an ATR-like volatility measure with a standard deviation 
+    component to handle regime shifts and noise expansion.
+    """
+    if len(y_actual) < window + 1:
+        return np.zeros(len(y_actual))
+    
+    diffs = np.abs(np.diff(y_actual))
+    atr = np.zeros(len(y_actual))
+    
+    for i in range(window, len(y_actual)):
+        # Calculate trailing mean and std for a robust volatility buffer
+        window_diffs = diffs[i-window:i]
+        vol_mean = np.mean(window_diffs)
+        vol_std = np.std(window_diffs)
+        # Combine mean and std to create a 'Noise Band'
+        atr[i] = vol_mean + (1.5 * vol_std)
+    
+    atr[:window] = atr[window]
+    return atr
 
 def get_binomial_weights(d, k):
     """

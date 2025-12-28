@@ -97,51 +97,72 @@ def estimate_y(diffs, X_tar, raw_anchors, k):
         pred_deltas.append(pred_delta)
     return np.array(y_preds), d_vals, pred_deltas
 
-def simulate_trading(y_actual, S_tar, y_preds, h_target, l_target, e_high, e_low, initial_cap=10000):
-    cap = initial_cap
-    equity_curve = [cap]
-    shorts = 0
-    longs = 0
+def simulate_trading(y_actual, S_tar, y_preds, h_target, l_target, e_high, e_low, pred_deltas, atr_history, initial_cap=10000):
+    """
+    Simulates trading with an Active Risk Management layer, including 
+    Regime-Switch Exits and Intraday Stop Loss validation.
+    """
+    cash = initial_cap
+    equity_curve = [initial_cap]
+    longs, shorts = 0, 0
+    
+    # Align history arrays
+    d_vals = pred_deltas[-len(y_preds):]
+    p_deltas = pred_deltas[-len(y_preds):]
+    atr_vals = atr_history[-len(y_preds):]
+
     for i in range(len(y_preds) - 1):
         price_now = y_actual[i]
-        expected_move = y_preds[i] - price_now
-        tp_dist = abs(expected_move)
+        p_delta = p_deltas[i]
+        current_d = d_vals[i]
         
-        # 1. DYNAMIC STOP LOSS: Instead of 0.3 * tp_dist, use the Energy Band distance
-        # as a volatility-adjusted floor/ceiling.
-        sl_dist = min(0.3 * tp_dist, abs(price_now - e_low[i] if expected_move > 0 else e_high[i] - price_now))
+        # 1. Regime-Switch Check: Exit if 'Memory' collapses (d < 0.25)
+        # 2. Quantum Pressure: Filter entries using dynamic energy bands
+        gauge_ma = np.mean(np.abs(S_tar[max(0, i-20):i+1]))
+        quantum_pressure = np.abs(S_tar[i]) > gauge_ma
+        vol_buffer = atr_vals[i] * (1.5 - current_d)
         
-        if expected_move > 0 and S_tar[i] < 0:  # LONG
-            tp_price = price_now + tp_dist
-            sl_price = price_now - sl_dist
-            longs +=1
-            # QUANTUM GATE: If the low energy band is rising, trail the stop
-            # to the maximum of the hard SL or the current Low Energy Band.
-            dynamic_sl = max(sl_price, e_low[i+1]) 
-            
-            if l_target[i+1] <= dynamic_sl:
-                cap *= (dynamic_sl / price_now) # Quantum Stop Out (Minimized Drawdown)
-            elif h_target[i+1] >= tp_price:
-                cap *= (tp_price / price_now)   # Target Reached
-            else:
-                cap *= (y_actual[i+1] / price_now) # Carry to Close
+        tp_dist = abs(y_preds[i] - price_now)
 
-        elif expected_move < 0 and S_tar[i] > 0: # SHORT
-            tp_price = price_now - tp_dist
-            sl_price = price_now + sl_dist
-            shorts += 1
-            # QUANTUM GATE: If the high energy band is falling, trail the stop
-            dynamic_sl = min(sl_price, e_high[i+1])
-            
-            if h_target[i+1] >= dynamic_sl:
-                cap *= (price_now / dynamic_sl) # Quantum Stop Out
-            elif l_target[i+1] <= tp_price:
-                cap *= (price_now / tp_price)   # Target Reached
-            else:
-                cap *= (price_now / y_actual[i+1])
+        # --- LONG LOGIC ---
+        if p_delta > 0.001 and S_tar[i] < 0 and quantum_pressure and current_d > 0.25:
+            if l_target[i] > (e_low[i] - vol_buffer):
+                tp_price = price_now + tp_dist
+                sl_price = price_now - min(0.3 * tp_dist, abs(price_now - e_low[i]) + vol_buffer)
                 
-        equity_curve.append(cap)
-    return equity_curve, cap, longs, shorts
+                if cash >= price_now:
+                    pos_shares = int(cash // price_now)
+                    # Use next-step High/Low for intraday validation
+                    n_high, n_low, n_close = h_target[i+1], l_target[i+1], y_actual[i+1]
+                    
+                    if n_low <= sl_price: # Stop Loss Triggered
+                        cash += (pos_shares * sl_price) - (pos_shares * price_now)
+                    elif n_high >= tp_price: # Take Profit Triggered
+                        cash += (pos_shares * tp_price) - (pos_shares * price_now)
+                    else: # Exit at step end
+                        cash += (pos_shares * n_close) - (pos_shares * price_now)
+                    longs += 1
+
+        # --- SHORT LOGIC ---
+        elif p_delta < -0.001 and S_tar[i] > 0 and quantum_pressure and current_d > 0.25:
+            if h_target[i] < (e_high[i] + vol_buffer):
+                tp_price = price_now - tp_dist
+                sl_price = price_now + min(0.3 * tp_dist, abs(e_high[i] - price_now) + vol_buffer)
+                
+                if cash > 0:
+                    pos_shares = int(cash // price_now)
+                    n_high, n_low, n_close = h_target[i+1], l_target[i+1], y_actual[i+1]
+                    
+                    if n_high >= sl_price: # Stop Loss Triggered (Price Up)
+                        cash += (price_now - sl_price) * pos_shares
+                    elif n_low <= tp_price: # Take Profit Triggered (Price Down)
+                        cash += (price_now - tp_price) * pos_shares
+                    else: # Exit at step end
+                        cash += (price_now - n_close) * pos_shares
+                    shorts += 1
+
+        equity_curve.append(cash)
+    return equity_curve, cash, longs, shorts
 
 
 def create_backtest_stats(ticker, equity_curve, final_capital, long_trades, short_trades):
@@ -195,7 +216,9 @@ def back_test(params):
         # Generate Inputs and Targets
         X_est, X_tar, S_tar, anchors, h_tar, l_tar, energy_high_target, energy_low_target = create_inputs(data, k)
         y_actual = create_targets(data, k)
-        
+        # Calculate ATR history for the whole series
+        atr_history = frac.get_atr(y_actual, window=14)
+
         # Forecasting
         y_preds, _, pred_deltas = estimate_y(X_est, X_tar, anchors, k)
         
@@ -203,7 +226,7 @@ def back_test(params):
         n = len(y_preds)
         assert len(pred_deltas) == n
         assert len(y_actual) == n + 1
-    
+
         goodness = report_goodness_of_fit(y_actual[:n], y_preds, pred_deltas)
         
         # FIX: Remove d_history and align h_tar/l_tar correctly
@@ -214,9 +237,12 @@ def back_test(params):
             h_tar[:n], 
             l_tar[:n],
             energy_high_target[:n],
-            energy_low_target[:n]
+            energy_low_target[:n],
+            pred_deltas,
+            atr_history
         )
-        
+        # y_actual, S_tar, y_preds, h_target, l_target, e_high, e_low, pred_deltas, atr_history, initial_cap=10000
+
         stats = create_backtest_stats(ticker, equity, final, longs, shorts)
         print(f"Finished backtesting for {ticker}")
         return {'stats': stats, 'goodness': goodness}
