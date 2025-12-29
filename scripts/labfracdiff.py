@@ -107,59 +107,72 @@ def simulate_trading(y_actual, S_tar, y_preds, h_target, l_target, e_high, e_low
     longs, shorts = 0, 0
     
     # Align history arrays
-    d_vals = pred_deltas[-len(y_preds):]
     p_deltas = pred_deltas[-len(y_preds):]
     atr_vals = atr_history[-len(y_preds):]
 
+    # Note: This simulation enforces a "1-step hold" strategy.
+    # Positions are opened at step i and closed by step i+1.
+    # No positions are maintained across loop iterations.
     for i in range(len(y_preds) - 1):
+        # 0.1 Calculate Entropy and Vol Spike
+        # Use a rolling window of the actual price series
+        price_window = y_actual[max(0, i-20):i+1]
+        entropy = frac.get_shannon_entropy(price_window)
+        vol_spike = frac.is_binary_event(atr_vals[:i+1])
+
         price_now = y_actual[i]
         p_delta = p_deltas[i]
-        current_d = d_vals[i]
+        p_delta_force = np.abs(p_delta)
+
+        # 2. Define the "Safe Zone"
+        # Logic: Memory must be present (d > 0.25) AND 
+        # Market must not be in a state of maximum chaos (entropy < 0.75) AND
+        # No current volatility shock (vol_spike == False)
+        is_tradable = (p_delta > 0.25) and (entropy < 0.75) and not vol_spike
         
         # 1. Regime-Switch Check: Exit if 'Memory' collapses (d < 0.25)
         # 2. Quantum Pressure: Filter entries using dynamic energy bands
         gauge_ma = np.mean(np.abs(S_tar[max(0, i-20):i+1]))
         quantum_pressure = np.abs(S_tar[i]) > gauge_ma
-        vol_buffer = atr_vals[i] * (1.5 - current_d)
+        vol_buffer = atr_vals[i] * (1.5 - p_delta_force)
         
         tp_dist = abs(y_preds[i] - price_now)
+        # is_tradable = (current_d > 0.25) and (entropy < 0.75) and not vol_spike
 
         # --- LONG LOGIC ---
-        if p_delta > 0.001 and S_tar[i] < 0 and quantum_pressure and current_d > 0.25:
-            if l_target[i] > (e_low[i] - vol_buffer):
-                tp_price = price_now + tp_dist
-                sl_price = price_now - min(0.3 * tp_dist, abs(price_now - e_low[i]) + vol_buffer)
+        if (p_delta > 0 and S_tar[i] < 0 and quantum_pressure and l_target[i] > (e_low[i] - vol_buffer)) and (p_delta_force > 0.0001 and entropy < 0.8 and not vol_spike):
+            tp_price = price_now + tp_dist
+            sl_price = price_now - min(0.3 * tp_dist, abs(price_now - e_low[i]) + vol_buffer)
+            
+            if cash >= price_now:
+                pos_shares = int(cash // price_now)
+                # Use next-step High/Low for intraday validation
+                n_high, n_low, n_close = h_target[i+1], l_target[i+1], y_actual[i+1]
                 
-                if cash >= price_now:
-                    pos_shares = int(cash // price_now)
-                    # Use next-step High/Low for intraday validation
-                    n_high, n_low, n_close = h_target[i+1], l_target[i+1], y_actual[i+1]
-                    
-                    if n_low <= sl_price: # Stop Loss Triggered
-                        cash += (pos_shares * sl_price) - (pos_shares * price_now)
-                    elif n_high >= tp_price: # Take Profit Triggered
-                        cash += (pos_shares * tp_price) - (pos_shares * price_now)
-                    else: # Exit at step end
-                        cash += (pos_shares * n_close) - (pos_shares * price_now)
-                    longs += 1
+                if n_low <= sl_price: # Stop Loss Triggered
+                    cash += (pos_shares * sl_price) - (pos_shares * price_now)
+                elif n_high >= tp_price: # Take Profit Triggered
+                    cash += (pos_shares * tp_price) - (pos_shares * price_now)
+                else: # Exit at step end
+                    cash += (pos_shares * n_close) - (pos_shares * price_now)
+                longs += 1
 
         # --- SHORT LOGIC ---
-        elif p_delta < -0.001 and S_tar[i] > 0 and quantum_pressure and current_d > 0.25:
-            if h_target[i] < (e_high[i] + vol_buffer):
-                tp_price = price_now - tp_dist
-                sl_price = price_now + min(0.3 * tp_dist, abs(e_high[i] - price_now) + vol_buffer)
+        elif (p_delta < 0 and S_tar[i] > 0 and quantum_pressure and h_target[i] < (e_high[i] + vol_buffer)) and (p_delta_force > 0.0001 and entropy < 0.8 and not vol_spike):
+            tp_price = price_now - tp_dist
+            sl_price = price_now + min(0.3 * tp_dist, abs(e_high[i] - price_now) + vol_buffer)
+            
+            if cash > 0:
+                pos_shares = int(cash // price_now)
+                n_high, n_low, n_close = h_target[i+1], l_target[i+1], y_actual[i+1]
                 
-                if cash > 0:
-                    pos_shares = int(cash // price_now)
-                    n_high, n_low, n_close = h_target[i+1], l_target[i+1], y_actual[i+1]
-                    
-                    if n_high >= sl_price: # Stop Loss Triggered (Price Up)
-                        cash += (price_now - sl_price) * pos_shares
-                    elif n_low <= tp_price: # Take Profit Triggered (Price Down)
-                        cash += (price_now - tp_price) * pos_shares
-                    else: # Exit at step end
-                        cash += (price_now - n_close) * pos_shares
-                    shorts += 1
+                if n_high >= sl_price: # Stop Loss Triggered (Price Up)
+                    cash += (price_now - sl_price) * pos_shares
+                elif n_low <= tp_price: # Take Profit Triggered (Price Down)
+                    cash += (price_now - tp_price) * pos_shares
+                else: # Exit at step end
+                    cash += (price_now - n_close) * pos_shares
+                shorts += 1
 
         equity_curve.append(cash)
     return equity_curve, cash, longs, shorts
@@ -209,9 +222,9 @@ def create_backtest_stats(ticker, equity_curve, final_capital, long_trades, shor
     return stats
 
 def back_test(params):
-    (k, ticker) = params
+    (k, ticker, quantization_level) = params
     try:
-        data = mkt.import_market_data(ticker)
+        data = mkt.import_market_data(ticker, quantization_level)
             
         # Generate Inputs and Targets
         X_est, X_tar, S_tar, anchors, h_tar, l_tar, energy_high_target, energy_low_target = create_inputs(data, k)
@@ -252,8 +265,9 @@ def back_test(params):
     
 if __name__ == '__main__':
     tickers_file = sys.argv[1]    
+    quantization_level = float(sys.argv[2]) if len(sys.argv) > 2 else 1e+2
     k = 14
-    tickers = [(k, ticker) for ticker in np.loadtxt(tickers_file, dtype=str)]
+    tickers = [(k, ticker, quantization_level) for ticker in np.loadtxt(tickers_file, dtype=str)]
     with Pool(processes=4) as pool:
         results = pool.map(back_test, tickers)
 

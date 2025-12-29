@@ -16,7 +16,8 @@ base_model_names = ('prob', 'pricevol', 'wavelets', 'gauge', 'barinbalance')
 # -- base trainer module
 def base_trainer(args):
     ticker = args.ticker.upper()
-    historical_data = mkt.import_market_data(ticker)
+    quantization_level = args.quantization_level    
+    historical_data = mkt.import_market_data(ticker, quantization_level)
     patience = args.patience
     model_factory_name = args.model
     epochs = args.epochs

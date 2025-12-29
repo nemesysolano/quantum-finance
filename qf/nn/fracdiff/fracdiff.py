@@ -2,7 +2,38 @@ import numpy as np
 from sklearn.linear_model import LinearRegression
 from scipy.optimize import curve_fit
 
-# Add to qf/nn/fracdiff.py
+def get_shannon_entropy(prices, window=20, bins=10):
+    """
+    Calculates Shannon Entropy of discretized returns. 
+    High values (> 0.8 normalized) indicate a 'Memoryless' Random Walk.
+    """
+    returns = np.diff(prices)
+    if len(returns) < window:
+        return 1.0 # Assume maximum chaos for insufficient data
+    
+    # Calculate entropy for the rolling window
+    hist, _ = np.histogram(returns[-window:], bins=bins, density=True)
+    # Filter out zero probabilities to avoid log(0)
+    p = hist[hist > 0]
+    entropy = -np.sum(p * np.log2(p))
+    
+    # Normalize by max possible entropy for the given bin count
+    max_entropy = np.log2(bins)
+    return entropy / max_entropy
+
+def is_binary_event(atr_history, window=20, threshold=2.5):
+    """
+    Detects if current volatility is a statistical outlier.
+    """
+    if len(atr_history) < window:
+        return False
+    
+    recent_vols = atr_history[-window:]
+    mean_vol = np.mean(recent_vols)
+    std_vol = np.std(recent_vols)
+    
+    z_score = (atr_history[-1] - mean_vol) / (std_vol + 1e-9)
+    return z_score > threshold
 
 def get_atr(y_actual, window=14):
     """

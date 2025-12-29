@@ -191,31 +191,34 @@ def add_price_volume_oscillator(historical_data):
     """
     df = historical_data
     
-    # Extract values
-    # if dataset has no Volume column, exit
-    
     p = df['Close'].values
-    v = df['Volume'].values
-    
+
     # Calculate shifts (t-1)
     p_prev = df['Close'].shift(1).values
-    v_prev = df['Volume'].shift(1).values
-    
+
     # 1. Calculate Δp(t): Bounded Percentage Difference of Price
     # Formula: (p(t) - p(t-1)) / (|p(t)| + |p(t-1)|)
     delta_p = (p - p_prev) / (np.abs(p) + np.abs(p_prev))
-    
-    # 2. Calculate Δv(t): Bounded Percentage Difference of Volume
-    delta_v = 1 if v[0] != 0 else (v - v_prev) / (np.abs(v) + np.abs(v_prev))
-    
-    # 3. Calculate Δ²v(t): Squared Serial Difference of Volume
-    delta_v_sq = np.square(delta_v)
-    
-    # 4. Calculate Y(t)
-    df['Y'] = delta_p * delta_v_sq
-    
-    # Fill NaN at index 0 (result of shift) with 0.0
-    
+
+    if df.loc[df.index[0], 'Volume'] > 0:        
+        v = df['Volume'].values
+        
+        # Calculate shifts (t-1)
+        v_prev = df['Volume'].shift(1).values
+                
+        # 2. Calculate Δv(t): Bounded Percentage Difference of Volume
+        delta_v = 1 if v[0] != 0 else (v - v_prev) / (np.abs(v) + np.abs(v_prev))
+        
+        # 3. Calculate Δ²v(t): Squared Serial Difference of Volume
+        delta_v_sq = np.square(delta_v)
+        
+        # 4. Calculate Y(t)
+        df['Y'] = delta_p * delta_v_sq
+        
+    else:
+        # 4. Calculate Y(t)
+        df['Y'] = delta_p
+        
     df.dropna(inplace=True)
     return df
 
@@ -497,7 +500,7 @@ def add_wavelet_differences(historical_data):
 
 
 
-def add_boundary_energy_levels(historical_data: pd.DataFrame, quantization_level: int = 1e2):
+def add_boundary_energy_levels(historical_data: pd.DataFrame, quantization_level):
     """
     Calculates and adds the quantum boundary energy levels (E_low, E_high)
     based on the empirical distribution of daily close price ratios (simple returns).
@@ -511,7 +514,10 @@ def add_boundary_energy_levels(historical_data: pd.DataFrame, quantization_level
     upper_boundaries = np.vectorize(lambda x: minimum_energy_level(x, λ))
     historical_data['E_Low'] = lower_boundaries(historical_data['Low'])
     historical_data['E_High'] = upper_boundaries(historical_data['High'])
-    historical_data.dropna(inplace=True)
+
+    historical_data['E_Low'] = historical_data['E_Low'].fillna(
+        historical_data['Close'] - np.abs(historical_data['High'] - historical_data['Close'])
+    )
 
 
 def add_scrodinger_gauge(historical_data):

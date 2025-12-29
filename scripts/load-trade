@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+SCRIPT_DIR="$( cd -- "$( dirname -- "${BASH_SOURCE[0]:-$0}"; )" &> /dev/null && pwd 2> /dev/null; )"
+BASE_MODELS=('probdiff' 'pricevol' 'wavelets' 'gauge' 'barinbalance')
+
+if [ $# -lt 2 ]
+then
+    echo "load-trade <tickers-file> <quantization-level>"
+    exit -1
+fi
+
+TICKERS_FILE=$1
+QUANTIZATION_LEVEL=$2
+for BASE_MODEL in ${BASE_MODELS[@]}
+do
+    for SYMBOL in $(cat ${TICKERS_FILE})
+    do
+        python3 -m qf base $SYMBOL --model=$BASE_MODEL --quantization_level=$QUANTIZATION_LEVEL
+    done
+done
+
+    for SYMBOL in $(cat ${TICKERS_FILE})
+    do
+        python3 -m qf meta $SYMBOL --backtest=combined
+    done

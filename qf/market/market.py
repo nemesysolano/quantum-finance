@@ -23,7 +23,7 @@ def remove_timezone_from_json_dates(file_path):
         f.writelines(modified)
 
 
-def import_market_data(symbol, lookback_periods = 14):    
+def import_market_data(symbol, quantization_level, lookback_periods = 14):    
     module_dir = os.path.dirname(__file__)
     data_dir = os.path.join(module_dir, 'data')
     output_path = os.path.join(data_dir, f"{symbol}.csv")
@@ -47,7 +47,7 @@ def import_market_data(symbol, lookback_periods = 14):
         add_price_volume_differences(historical_data)
         add_probability_differences(historical_data)
         add_wavelet_differences(historical_data)
-        add_boundary_energy_levels(historical_data)
+        add_boundary_energy_levels(historical_data, quantization_level)
         add_scrodinger_gauge(historical_data)
         add_scrodinger_gauge_differences(historical_data)
         add_bar_inbalance(historical_data)
