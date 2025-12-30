@@ -90,16 +90,8 @@ def estimate_y(diffs, X_tar, anchors, k):
 
 def simulate_trading(y_actual, anchors, y_preds, h_target, l_target, e_high, e_low, pred_deltas, atr_history, initial_cap=500):
     """
-    Revised simulate_trading with corrected alignment (Shift) and Adjusted Exit logic.
-    
-    Args:
-        y_actual: Actual close prices for prediction targets (t+1).
-        anchors: Entry prices known at time t (c[k:-1]).
-        y_preds: Predicted prices for t+1.
-        h_target/l_target: Intraday high/low between t and t+1.
-        e_high/e_low: Energy band boundaries at time t.
-        pred_deltas: Predicted fractional changes.
-        atr_history: Trailing volatility buffer.
+    Hedging implementation: Opens both Long and Short positions simultaneously.
+    Maintains existing signature for back_test compatibility.
     """
     cash = initial_cap
     equity_curve = [initial_cap]
@@ -107,17 +99,13 @@ def simulate_trading(y_actual, anchors, y_preds, h_target, l_target, e_high, e_l
     winner_longs, winner_shorts = 0, 0
     loser_longs, loser_shorts = 0, 0
     delta_strength = 9e-6
-    contracts = 10    
+    contracts = max(1, int(cash // 2000))    
     stop_loss_scaler_min = 1/5
     stop_loss_scaler_max = 1/2
 
-    # Iterate through each prediction step
     for i in range(len(y_preds)):
-        # 1. Decision context at time t (Shift Fix)
-        # Entry price is the anchor price known at time t
         price_entry = anchors[i] 
         p_delta = pred_deltas[i]
-        vol_buffer = atr_history[i] * (1.5 - np.abs(p_delta))
         
         # Stability filters (Regime Detection)
         price_window = anchors[max(0, i-20):i+1]
@@ -126,65 +114,72 @@ def simulate_trading(y_actual, anchors, y_preds, h_target, l_target, e_high, e_l
 
         is_stable = (entropy < 0.85) and (not vol_spike) and (np.abs(p_delta) >= delta_strength) and (delta_strength < 1)
         delta_strength = 0.25*delta_strength + 0.75*np.abs(p_delta)
+        
         if not is_stable:
             equity_curve.append(cash)
             continue
             
-        # Target/Exit logic (using t+1 data for evaluation)
-        # tp_dist = abs(y_preds[i] - price_entry)
         n_high, n_low, n_close = h_target[i], l_target[i], y_actual[i]        
         
+        # --- MANAGEMENT TRICKS: CONFIDENCE SCALING ---
+        # Calculate scalers based on predicted move strength
+        conf_shift = np.sign(p_delta) * np.power(10, np.floor(np.log10(delta_strength)))
+        
         stop_loss_scaler = np.clip(
-            stop_loss_scaler_min*(1 + np.sign(p_delta) * np.power(10,np.floor(np.log10(delta_strength)))), 
+            stop_loss_scaler_min * (1 + conf_shift), 
             stop_loss_scaler_min, 
             stop_loss_scaler_max
         )
-        take_profit_scaler = 1 + np.sign(p_delta) * np.power(10,np.floor(np.log10(delta_strength)))
-        tp_dist = abs(y_preds[i] - price_entry)*take_profit_scaler
+        # Take profit is widened for the primary side and tightened for the hedge
+        primary_tp_scaler = 1 + conf_shift
+        hedge_tp_scaler = 1 - conf_shift
         
-        # --- LONG LOGIC ---
+        tp_dist_base = abs(y_preds[i] - price_entry)
+        
+        # --- ASYMMETRIC CAPITAL ALLOCATION ---
+        # 75% to the predicted direction, 25% to the hedge
         if p_delta > 0:
-            tp_price = price_entry + tp_dist
-            sl_price = price_entry - stop_loss_scaler * tp_dist # min(stop_loss_scaler * tp_dist, abs(price_entry - e_low[i]) + vol_buffer)
-            
-            if cash >= price_entry:
-                pos_shares = int(cash // price_entry)*contracts
-                # Adjusted Exit: Check path between t and t+1
-                if n_low <= sl_price: # Stop Loss Triggered
-                    cash += pos_shares * (sl_price - price_entry)
-                    loser_longs += 1
-                    longs += 1
+            cap_long, cap_short = cash * 0.75, cash * 0.25
+            tp_long_mult, tp_short_mult = primary_tp_scaler, hedge_tp_scaler
+        else:
+            cap_long, cap_short = cash * 0.25, cash * 0.75
+            tp_long_mult, tp_short_mult = hedge_tp_scaler, primary_tp_scaler
 
-                elif n_high >= tp_price: # Take Profit Triggered
-                    cash += pos_shares * (tp_price - price_entry)
-                    winner_longs += 1
-                    longs += 1
-                
+        # --- CHANNEL 1: LONG POSITION ---
+        tp_long = price_entry + (tp_dist_base * tp_long_mult)
+        sl_long = price_entry - (stop_loss_scaler * tp_dist_base)
+        pos_long = int(cap_long // price_entry) * contracts
+        
+        if n_low <= sl_long:
+            res_long = pos_long * (sl_long - price_entry)
+            loser_longs += 1
+        elif n_high >= tp_long:
+            res_long = pos_long * (tp_long - price_entry)
+            winner_longs += 1
+        else:
+            res_long = pos_long * (n_close - price_entry)
+        longs += 1
 
-        # --- SHORT LOGIC ---
-        elif p_delta < 0:
-            tp_price = price_entry - tp_dist
-            sl_price = price_entry + stop_loss_scaler * tp_dist #min(stop_loss_scaler * tp_dist, abs(e_high[i] - price_entry) + vol_buffer)
-            
-            if cash > 0:
-                pos_shares = int(cash // price_entry)*contracts
-                
-                # Adjusted Exit: PnL = (Entry - Exit) for shorts
-                if n_high >= sl_price: # Stop Loss Triggered (Price Up)
-                    cash += (price_entry - sl_price) * pos_shares
-                    loser_shorts += 1
-                    shorts += 1
+        # --- CHANNEL 2: SHORT POSITION (HEDGE) ---
+        tp_short = price_entry - (tp_dist_base * tp_short_mult)
+        sl_short = price_entry + (stop_loss_scaler * tp_dist_base)
+        pos_short = int(cap_short // price_entry) * contracts
+        
+        if n_high >= sl_short:
+            res_short = pos_short * (price_entry - sl_short)
+            loser_shorts += 1
+        elif n_low <= tp_short:
+            res_short = pos_short * (price_entry - tp_short)
+            winner_shorts += 1
+        else:
+            res_short = pos_short * (price_entry - n_close)
+        shorts += 1
 
-                elif n_low <= tp_price: # Take Profit Triggered (Price Down)
-                    cash += (price_entry - tp_price) * pos_shares
-                    winner_shorts += 1
-                    shorts += 1
-                
-
+        # Update total cash with results from both sides
+        cash += (res_long + res_short)
         equity_curve.append(cash)
         
     return equity_curve, cash, longs, shorts, winner_longs, winner_shorts, loser_longs, loser_shorts
-
 
 
 def create_backtest_stats(ticker, equity_curve, final_capital, long_trades, short_trades, winner_longs, winner_shorts, loser_longs, loser_short):
@@ -285,7 +280,7 @@ def back_test(params):
 if __name__ == '__main__':
     tickers_file = sys.argv[1]    
     quantization_level = float(sys.argv[2]) if len(sys.argv) > 2 else 1e+3
-    interval = '1d'
+    interval = sys.argv[3] if len(sys.argv) > 3 else '1d'
     k = 14
     tickers = [(k, ticker, quantization_level, interval) for ticker in np.loadtxt(tickers_file, dtype=str)]
     with Pool(processes=4) as pool:
