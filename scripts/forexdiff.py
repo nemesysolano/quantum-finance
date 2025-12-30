@@ -6,34 +6,25 @@ import sys, os
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 import qf.nn.fracdiff as frac
 
-def report_goodness_of_fit(y_true, y_pred, pred_deltas):
+def report_goodness_of_fit(y_true, y_pred, pred_deltas, anchors):
     """
-    Compares the predicted deltas with actual serial differences using the 
-    Bounded Percentage Difference formula: (b-a) / (|a| + |b|)
+    Revised to correctly align predicted deltas with the actual bar result.
     """
     y_true = np.array(y_true)
     y_pred = np.array(y_pred)
     pred_deltas = np.array(pred_deltas)
+    anchors = np.array(anchors)
 
-    # 1. Calculate Actual Serial Differences (Delta_%)
-    # a = price at t, b = price at t+1
-    a = y_true[:-1]
-    b = y_true[1:]
-    actual_deltas = (b - a) / (np.abs(a) + np.abs(b))
+    # 1. Calculate Actual Move for the bar: (Entry -> Exit)
+    # This matches the pred_deltas which were for this specific interval.
+    actual_deltas = (y_true - anchors) / (np.abs(anchors) + np.abs(y_true))
 
-    # 2. Align and compare
-    # y_pred[t] was predicted using pred_deltas[t] to match actual_deltas[t]
-    min_len = min(len(actual_deltas), len(pred_deltas))
-    target = actual_deltas[:min_len]
-    signal = pred_deltas[:min_len]
-
-    delta_mae = mean_absolute_error(target, signal)
-    
-    sign_match = np.mean(np.sign(target) == np.sign(signal))
+    delta_mae = mean_absolute_error(actual_deltas, pred_deltas)
+    sign_match = np.mean(np.sign(actual_deltas) == np.sign(pred_deltas))
 
     # Traditional price-space metrics
-    mae = mean_absolute_error(y_true[1:min_len+1], y_pred[:min_len])
-    rmse = np.sqrt(mean_squared_error(y_true[1:min_len+1], y_pred[:min_len]))
+    mae = mean_absolute_error(y_true, y_pred)
+    rmse = np.sqrt(mean_squared_error(y_true, y_pred))
     
     return {"mae": mae, "rmse": rmse, "sign_match": sign_match, "delta_mae": delta_mae}
 
@@ -65,7 +56,7 @@ def create_inputs(historical_data, k):
     X_tar = X_all[:-1] 
     
     # 3. Knowledge at time t: Indicators and the entry anchor price
-    S_at_t = S[k:-1] 
+    anchors = S[k:-1] 
     raw_anchors = c[k:-1]
     
     # 4. Future path data (t+1) for SL/TP verification
@@ -75,10 +66,10 @@ def create_inputs(historical_data, k):
     energy_low_target = El[k+1:]
     
     # Return the full diffs array to allow walk-forward fitting of 'd'
-    return diffs, X_tar, S_at_t, raw_anchors, h_target, l_target, energy_high_target, energy_low_target
+    return diffs, X_tar, anchors, raw_anchors, h_target, l_target, energy_high_target, energy_low_target
 
 
-def estimate_y(diffs, X_tar, raw_anchors, k):
+def estimate_y(diffs, X_tar, anchors, k):
     """Walk-forward estimation of fractional predictions with no target leakage."""
     y_preds, d_vals, pred_deltas = [], [], []
     for i in range(len(X_tar)):
@@ -91,94 +82,112 @@ def estimate_y(diffs, X_tar, raw_anchors, k):
         d_hat = frac.perform_ols_and_fit(history_for_d, target_for_d, k)
         
         # Now predict the NEXT move (t to t+1) using the fitted d
-        pred, pred_delta = frac.predict_next_price(X_tar[i], d_hat, k, raw_anchors[i])
+        pred, pred_delta = frac.predict_next_price(X_tar[i], d_hat, k, anchors[i])
         y_preds.append(pred)
         d_vals.append(d_hat)
         pred_deltas.append(pred_delta)
     return np.array(y_preds), d_vals, pred_deltas
 
-def simulate_trading(y_actual, S_tar, y_preds, h_target, l_target, e_high, e_low, pred_deltas, atr_history, initial_cap=10000):
+def simulate_trading(y_actual, anchors, y_preds, h_target, l_target, e_high, e_low, pred_deltas, atr_history, initial_cap=500):
     """
-    Simulates trading with an Active Risk Management layer, including 
-    Regime-Switch Exits and Intraday Stop Loss validation.
+    Revised simulate_trading with corrected alignment (Shift) and Adjusted Exit logic.
+    
+    Args:
+        y_actual: Actual close prices for prediction targets (t+1).
+        anchors: Entry prices known at time t (c[k:-1]).
+        y_preds: Predicted prices for t+1.
+        h_target/l_target: Intraday high/low between t and t+1.
+        e_high/e_low: Energy band boundaries at time t.
+        pred_deltas: Predicted fractional changes.
+        atr_history: Trailing volatility buffer.
     """
     cash = initial_cap
     equity_curve = [initial_cap]
     longs, shorts = 0, 0
-    
-    # Align history arrays
-    p_deltas = pred_deltas[-len(y_preds):]
-    atr_vals = atr_history[-len(y_preds):]
+    winner_longs, winner_shorts = 0, 0
+    loser_longs, loser_shorts = 0, 0
+    delta_strength = 9e-6
+    contracts = 10    
+    stop_loss_scaler_min = 1/5
+    stop_loss_scaler_max = 1/2
 
-    # Note: This simulation enforces a "1-step hold" strategy.
-    # Positions are opened at step i and closed by step i+1.
-    # No positions are maintained across loop iterations.
-    for i in range(len(y_preds) - 1):
-        # 0.1 Calculate Entropy and Vol Spike
-        # Use a rolling window of the actual price series
-        price_window = y_actual[max(0, i-20):i+1]
+    # Iterate through each prediction step
+    for i in range(len(y_preds)):
+        # 1. Decision context at time t (Shift Fix)
+        # Entry price is the anchor price known at time t
+        price_entry = anchors[i] 
+        p_delta = pred_deltas[i]
+        vol_buffer = atr_history[i] * (1.5 - np.abs(p_delta))
+        
+        # Stability filters (Regime Detection)
+        price_window = anchors[max(0, i-20):i+1]
         entropy = frac.get_shannon_entropy(price_window)
-        vol_spike = frac.is_binary_event(atr_vals[:i+1])
+        vol_spike = frac.is_binary_event(atr_history[:i+1])
 
-        price_now = y_actual[i]
-        p_delta = p_deltas[i]
-        p_delta_force = np.abs(p_delta)
-
-        # 2. Define the "Safe Zone"
-        # Logic: Memory must be present (d > 0.25) AND 
-        # Market must not be in a state of maximum chaos (entropy < 0.75) AND
-        # No current volatility shock (vol_spike == False)
-        is_tradable = (p_delta > 0.25) and (entropy < 0.75) and not vol_spike
-        
-        # 1. Regime-Switch Check: Exit if 'Memory' collapses (d < 0.25)
-        # 2. Quantum Pressure: Filter entries using dynamic energy bands
-        gauge_ma = np.mean(np.abs(S_tar[max(0, i-20):i+1]))
-        quantum_pressure = np.abs(S_tar[i]) > gauge_ma
-        vol_buffer = atr_vals[i] * (1.5 - p_delta_force)
-        
-        tp_dist = abs(y_preds[i] - price_now)
-        # is_tradable = (current_d > 0.25) and (entropy < 0.75) and not vol_spike
-
-        # --- LONG LOGIC ---
-        if (p_delta > 0 and S_tar[i] < 0 and quantum_pressure and l_target[i] > (e_low[i] - vol_buffer)) and (p_delta_force > 0.0001 and entropy < 0.8 and not vol_spike):
-            tp_price = price_now + tp_dist
-            sl_price = price_now - min(0.3 * tp_dist, abs(price_now - e_low[i]) + vol_buffer)
+        is_stable = (entropy < 0.85) and (not vol_spike) and (np.abs(p_delta) >= delta_strength) and (delta_strength < 1)
+        delta_strength = 0.25*delta_strength + 0.75*np.abs(p_delta)
+        if not is_stable:
+            equity_curve.append(cash)
+            continue
             
-            if cash >= price_now:
-                pos_shares = int(cash // price_now)
-                # Use next-step High/Low for intraday validation
-                n_high, n_low, n_close = h_target[i+1], l_target[i+1], y_actual[i+1]
-                
+        # Target/Exit logic (using t+1 data for evaluation)
+        # tp_dist = abs(y_preds[i] - price_entry)
+        n_high, n_low, n_close = h_target[i], l_target[i], y_actual[i]        
+        
+        stop_loss_scaler = np.clip(
+            stop_loss_scaler_min*(1 + np.sign(p_delta) * np.power(10,np.floor(np.log10(delta_strength)))), 
+            stop_loss_scaler_min, 
+            stop_loss_scaler_max
+        )
+        take_profit_scaler = 1 + np.sign(p_delta) * np.power(10,np.floor(np.log10(delta_strength)))
+        tp_dist = abs(y_preds[i] - price_entry)*take_profit_scaler
+        
+        # --- LONG LOGIC ---
+        if p_delta > 0:
+            tp_price = price_entry + tp_dist
+            sl_price = price_entry - stop_loss_scaler * tp_dist # min(stop_loss_scaler * tp_dist, abs(price_entry - e_low[i]) + vol_buffer)
+            
+            if cash >= price_entry:
+                pos_shares = int(cash // price_entry)*contracts
+                # Adjusted Exit: Check path between t and t+1
                 if n_low <= sl_price: # Stop Loss Triggered
-                    cash += (pos_shares * sl_price) - (pos_shares * price_now)
+                    cash += pos_shares * (sl_price - price_entry)
+                    loser_longs += 1
+                    longs += 1
+
                 elif n_high >= tp_price: # Take Profit Triggered
-                    cash += (pos_shares * tp_price) - (pos_shares * price_now)
-                else: # Exit at step end
-                    cash += (pos_shares * n_close) - (pos_shares * price_now)
-                longs += 1
+                    cash += pos_shares * (tp_price - price_entry)
+                    winner_longs += 1
+                    longs += 1
+                
 
         # --- SHORT LOGIC ---
-        elif (p_delta < 0 and S_tar[i] > 0 and quantum_pressure and h_target[i] < (e_high[i] + vol_buffer)) and (p_delta_force > 0.0001 and entropy < 0.8 and not vol_spike):
-            tp_price = price_now - tp_dist
-            sl_price = price_now + min(0.3 * tp_dist, abs(e_high[i] - price_now) + vol_buffer)
+        elif p_delta < 0:
+            tp_price = price_entry - tp_dist
+            sl_price = price_entry + stop_loss_scaler * tp_dist #min(stop_loss_scaler * tp_dist, abs(e_high[i] - price_entry) + vol_buffer)
             
             if cash > 0:
-                pos_shares = int(cash // price_now)
-                n_high, n_low, n_close = h_target[i+1], l_target[i+1], y_actual[i+1]
+                pos_shares = int(cash // price_entry)*contracts
                 
+                # Adjusted Exit: PnL = (Entry - Exit) for shorts
                 if n_high >= sl_price: # Stop Loss Triggered (Price Up)
-                    cash += (price_now - sl_price) * pos_shares
+                    cash += (price_entry - sl_price) * pos_shares
+                    loser_shorts += 1
+                    shorts += 1
+
                 elif n_low <= tp_price: # Take Profit Triggered (Price Down)
-                    cash += (price_now - tp_price) * pos_shares
-                else: # Exit at step end
-                    cash += (price_now - n_close) * pos_shares
-                shorts += 1
+                    cash += (price_entry - tp_price) * pos_shares
+                    winner_shorts += 1
+                    shorts += 1
+                
 
         equity_curve.append(cash)
-    return equity_curve, cash, longs, shorts
+        
+    return equity_curve, cash, longs, shorts, winner_longs, winner_shorts, loser_longs, loser_shorts
 
 
-def create_backtest_stats(ticker, equity_curve, final_capital, long_trades, short_trades):
+
+def create_backtest_stats(ticker, equity_curve, final_capital, long_trades, short_trades, winner_longs, winner_shorts, loser_longs, loser_short):
     # Ensure 1D array even if input is a list of arrays or 2D matrix
     equity_array = np.ravel(equity_curve)
     # If final_capital was an array due to the previous bug, take the first value
@@ -216,15 +225,19 @@ def create_backtest_stats(ticker, equity_curve, final_capital, long_trades, shor
         "Peak Equity": np.max(equity_array),
         "Final Drawdown (%)": drawdowns[-1] * 100,
         "Long Trades": long_trades,
-        "Short Trades": short_trades
+        "Short Trades": short_trades,
+        "Winner Longs": winner_longs,
+        "Winner Shorts": winner_shorts,
+        "Loser Longs": loser_longs,
+        "Loser Shorts": loser_short
     }
 
     return stats
 
 def back_test(params):
-    (k, ticker, quantization_level) = params
+    (k, ticker, quantization_level, interval) = params
     try:
-        data = mkt.import_market_data(ticker, quantization_level)
+        data = mkt.import_market_data(ticker, quantization_level, interval)
             
         # Generate Inputs and Targets
         X_est, X_tar, S_tar, anchors, h_tar, l_tar, energy_high_target, energy_low_target = create_inputs(data, k)
@@ -240,12 +253,18 @@ def back_test(params):
         assert len(pred_deltas) == n
         assert len(y_actual) == n + 1
 
-        goodness = report_goodness_of_fit(y_actual[:n], y_preds, pred_deltas)
+        goodness = report_goodness_of_fit(
+            y_actual[:n], 
+            y_preds, 
+            pred_deltas, 
+            anchors[:n] # Pass anchors for correct return calculation
+        )
         
         # FIX: Remove d_history and align h_tar/l_tar correctly
-        equity, final, longs, shorts = simulate_trading(
+        # Inside back_test(params):
+        equity, final, longs, shorts, winner_longs, winner_shorts, loser_longs, loser_shorts= simulate_trading(
             y_actual[:n], 
-            S_tar[:n], 
+            anchors[:n], # REPLACED S_tar with anchors
             y_preds, 
             h_tar[:n], 
             l_tar[:n],
@@ -256,7 +275,7 @@ def back_test(params):
         )
         # y_actual, S_tar, y_preds, h_target, l_target, e_high, e_low, pred_deltas, atr_history, initial_cap=10000
 
-        stats = create_backtest_stats(ticker, equity, final, longs, shorts)
+        stats = create_backtest_stats(ticker, equity, final, longs, shorts, winner_longs, winner_shorts, loser_longs, loser_shorts)
         print(f"Finished backtesting for {ticker}")
         return {'stats': stats, 'goodness': goodness}
     except Exception as cause:
@@ -265,18 +284,18 @@ def back_test(params):
     
 if __name__ == '__main__':
     tickers_file = sys.argv[1]    
-    quantization_level = float(sys.argv[2]) if len(sys.argv) > 2 else 1e+2
+    quantization_level = float(sys.argv[2]) if len(sys.argv) > 2 else 1e+3
+    interval = '15m'
     k = 14
-    tickers = [(k, ticker, quantization_level) for ticker in np.loadtxt(tickers_file, dtype=str)]
+    tickers = [(k, ticker, quantization_level, interval) for ticker in np.loadtxt(tickers_file, dtype=str)]
     with Pool(processes=4) as pool:
         results = pool.map(back_test, tickers)
 
-    
-    output_file = os.path.join(os.getcwd(), "test-results", f"report-labfracdiff.md")
+    output_file = os.path.join(os.getcwd(), "test-results", f"report-forex.md")
     os.remove(output_file) if os.path.exists(output_file) else None
     with open(output_file, 'w') as f: #  {"mae": mae, "rmse": rmse, "r2": r2, "sign_match": sign_match}
-        print("|Ticker|Initial Capital|Final Capital|Total Return (%)|Max Drawdown (%)|Volatility (per step)|Sharpe Ratio|Number of Steps|Peak Equity|Final Drawdown|Long Trades|Short Trade|Delta MAE|", file=f)
-        print("|---|---|---|---|---|---|---|---|---|---|---|---|---|", file=f)
+        print("|Ticker|Initial Capital|Final Capital|Total Return (%)|Max Drawdown (%)|Volatility (per step)|Sharpe Ratio|Number of Steps|Peak Equity|Final Drawdown|Long Trades|Short Trades|Winner Longs|Winner Shorts|Loser Longs|Loser Shorts|Delta MAE|", file=f)
+        print("|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|", file=f)
     
         for result in results:    
             if result is None:
@@ -284,4 +303,4 @@ if __name__ == '__main__':
             
             stats = result['stats']
             goodness = result['goodness']
-            print(f"|{stats['Ticker']}|{stats['Initial Capital']:.2f}|{stats['Final Capital']:.2f}|{stats['Total Return (%)']:.2f}|{stats['Max Drawdown (%)']:.2f}|{stats['Volatility (per step)']:.4f}|{stats['Sharpe Ratio']:.4f}|{stats['Number of Steps']}|{stats['Peak Equity']:.2f}|{stats['Final Drawdown (%)']:.2f}|{stats['Long Trades']}|{stats['Short Trades']}|{goodness['delta_mae']:.4f}|", file=f)
+            print(f"|{stats['Ticker']}|{stats['Initial Capital']:.2f}|{stats['Final Capital']:.2f}|{stats['Total Return (%)']:.2f}|{stats['Max Drawdown (%)']:.2f}|{stats['Volatility (per step)']:.4f}|{stats['Sharpe Ratio']:.4f}|{stats['Number of Steps']}|{stats['Peak Equity']:.2f}|{stats['Final Drawdown (%)']:.2f}|{stats['Long Trades']}|{stats['Short Trades']}|{stats['Winner Longs']}|{stats['Winner Shorts']}|{stats['Loser Longs']}|{stats['Loser Shorts']}|{goodness['delta_mae']:.4f}|", file=f)

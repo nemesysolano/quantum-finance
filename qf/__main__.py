@@ -42,7 +42,8 @@ if __name__ == '__main__': #
     parser.add_argument('--dropout_rate', type=float, default=0.2, help='Number of epochs with no improvement after which training will be stopped.')
     parser.add_argument('--scale_features', type=str, default='no', choices=['yes', 'no'])
     parser.add_argument('--backtest', type=str, default='sgd', choices=['sgd', 'linear', 'combined'])
-    parser.add_argument("--quantization_level", type=float, default=1e2)
+    parser.add_argument('--quantization_level', type=float, default=1e2)
+    parser.add_argument('--interval', type=str, default='1d', choices=['1d', '15m'])
     args = parser.parse_args()
     trainer = model_trainers[args.trainer]
     trainer(args)

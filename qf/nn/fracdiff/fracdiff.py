@@ -102,5 +102,6 @@ def predict_next_price(window_diffs, d, k, last_raw_price):
     """
     weights = get_binomial_weights(d, k)
     pred_delta = np.clip(np.dot(weights, window_diffs), -0.99, 0.99)
-    # Reversing the Bounded Percentage Difference formula
-    return last_raw_price * (1 + pred_delta) / (1 - pred_delta), pred_delta
+    pred_delta_scaler =  (1 + pred_delta) / (1 - pred_delta)
+    next_price = last_raw_price * pred_delta_scaler
+    return next_price, pred_delta

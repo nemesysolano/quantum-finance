@@ -2,6 +2,7 @@ import pandas as pd
 import yfinance as yf
 import os
 import re
+from datetime import datetime, timedelta
 
 from qf import context
 from qf.market.augmentation import add_bar_inbalance, add_boundary_energy_levels, add_breaking_gap, add_directional_probabilities, add_price_time_angles, add_price_volume_differences, add_price_volume_oscillator, add_probability_differences, add_scrodinger_gauge, add_scrodinger_gauge_differences, add_swing_ratio, add_wavelet_differences, add_wavelets
@@ -11,19 +12,18 @@ def read_csv(path):
     historical_data = pd.read_csv(path, parse_dates=True, date_format='%Y-%m-%d %H:%M:%S', index_col='Date')
     return historical_data
 
-def remove_timezone_from_json_dates(file_path):
+def remove_timezone_from_json_dates(file_path, interval):
     if not os.path.exists(file_path):
-        print(f"File not found: {file_path}")
         return
-    print(f"Removing timezone from file: {file_path}")
-    with open(file_path, 'r') as f:
-        source = f.read()
-        modified = re.sub(r'\d{2}:\d{2}:\d{2}.\d{2}:\d{2}\s*', '', source) # 2015-12-23 00:00:00+00:00        
-    with open(file_path, 'w') as f:
-        f.writelines(modified)
+    if interval == '1d':
+        with open(file_path, 'r') as f:
+            source = f.read()
+            modified = re.sub(r'\d{2}:\d{2}:\d{2}.\d{2}:\d{2}\s*', '', source) # 2015-12-23 00:00:00+00:00        
+        with open(file_path, 'w') as f:
+            f.writelines(modified)
 
 
-def import_market_data(symbol, quantization_level, lookback_periods = 14):    
+def import_market_data(symbol, quantization_level, interval, lookback_periods = 14):    
     module_dir = os.path.dirname(__file__)
     data_dir = os.path.join(module_dir, 'data')
     output_path = os.path.join(data_dir, f"{symbol}.csv")
@@ -32,10 +32,19 @@ def import_market_data(symbol, quantization_level, lookback_periods = 14):
         os.makedirs(data_dir)
    
     if not os.path.exists(output_path):
-        ticker = yf.Ticker(symbol)        
-        historical_data = ticker.history(period="10y", interval="1d")  
+        ticker = yf.Ticker(symbol)     
+
+        if interval == '15m':
+            end_date = datetime.now()
+            start_date = end_date - timedelta(days=59)
+            historical_data = ticker.history(interval="15m", start=start_date, end=end_date)
+        else:              
+            historical_data = ticker.history("10y")  
+        # Rename Date column to Datetime column just in case
+        historical_data.index.name = 'Date'
+        
         historical_data.to_csv(output_path)        
-        remove_timezone_from_json_dates(output_path)
+        remove_timezone_from_json_dates(output_path, interval)
         historical_data = read_csv(output_path)
 
         add_breaking_gap(historical_data, 0.01)

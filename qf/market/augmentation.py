@@ -200,7 +200,8 @@ def add_price_volume_oscillator(historical_data):
     # Formula: (p(t) - p(t-1)) / (|p(t)| + |p(t-1)|)
     delta_p = (p - p_prev) / (np.abs(p) + np.abs(p_prev))
 
-    if df.loc[df.index[0], 'Volume'] > 0:        
+
+    if df.loc[df.index[0], 'Volume'] > 0:
         v = df['Volume'].values
         
         # Calculate shifts (t-1)

@@ -416,7 +416,7 @@ def best_threshold(results):
 
     return best_history, best_stats
 
-def meta_trainer_run(ticker, trainer, quantization_level):
+def meta_trainer_run(ticker, trainer, quantization_level, interval):
     v3_config = {
         'conviction_threshold': 0.4,  # 2/4 models agreement
         'risk_circuit_breaker': 0.035, # 3.5% structural risk limit
@@ -425,7 +425,7 @@ def meta_trainer_run(ticker, trainer, quantization_level):
         'loser_threshold': 0.70
     }
 
-    data = mkt.import_market_data(ticker, quantization_level)        
+    data = mkt.import_market_data(ticker, quantization_level, interval)        
     base_models = load_base_models(ticker)
     magnitude_thresholds = [5e-5, 0.001, 0.003, 0.005, 0.010, 0.015, 0.020, 0.030]
     
@@ -444,6 +444,7 @@ def meta_trainer(args):
     ticker = args.ticker.upper()
     backtest_name = args.backtest
     quantization_level = args.quantization_level
+    interval = args.interval
 
     backest_names ={
         'sgd': train_and_test_sgd_ensemble,
@@ -452,7 +453,7 @@ def meta_trainer(args):
     }
 
     try:
-        best_hist, _, best_stats, _ = meta_trainer_run(ticker, backest_names[backtest_name], quantization_level)
+        best_hist, _, best_stats, _ = meta_trainer_run(ticker, backest_names[backtest_name], quantization_level, interval)
     except ValueError as cause:
         print(f"Value error {str(cause)} ocurred for {ticker}")
         exit(-1)
