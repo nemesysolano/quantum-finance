@@ -34,7 +34,7 @@ def import_market_data(symbol, quantization_level, interval, lookback_periods = 
     if not os.path.exists(output_path):
         ticker = yf.Ticker(symbol)     
 
-        if interval == '15m':
+        if interval == '1h':
             end_date = datetime.now()
             start_date = end_date - timedelta(days=59)
             historical_data = ticker.history(interval="15m", start=start_date, end=end_date)

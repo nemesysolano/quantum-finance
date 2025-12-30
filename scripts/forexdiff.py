@@ -285,7 +285,7 @@ def back_test(params):
 if __name__ == '__main__':
     tickers_file = sys.argv[1]    
     quantization_level = float(sys.argv[2]) if len(sys.argv) > 2 else 1e+3
-    interval = '15m'
+    interval = '1d'
     k = 14
     tickers = [(k, ticker, quantization_level, interval) for ticker in np.loadtxt(tickers_file, dtype=str)]
     with Pool(processes=4) as pool:
