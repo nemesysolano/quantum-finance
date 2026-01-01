@@ -25,9 +25,16 @@ base_model_factories = {
 
 
 if __name__ == '__main__': # 
-    parser = argparse.ArgumentParser()
-    if sys.argv[1] == 'import':
-        mkt.import_market_all_data()
+    
+    if sys.argv[1] == 'import':        
+        quantization_level = float(sys.argv[2]) if len(sys.argv) > 2 else 1e+6
+        interval = sys.argv[3] if len(sys.argv) > 3 else '1d'
+        lookback_periods = np.clip(int(sys.argv[4]), 14, 30) if len(sys.argv) > 4 else 14
+        mkt.import_market_all_data(
+            quantization_level, 
+            interval, 
+            lookback_periods
+        )
         exit()
 
     tf.random.set_seed(42)

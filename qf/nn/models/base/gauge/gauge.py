@@ -2,6 +2,7 @@ import tensorflow as tf
 from tensorflow import keras
 from tensorflow.keras import layers, regularizers
 import numpy as np
+import pandas as pd
 
 def create_model(k, l2_rate,  dropout_rate):
     
@@ -31,24 +32,23 @@ def create_model(k, l2_rate,  dropout_rate):
 def create_targets(historical_data, k=14):
     """
     Creates the prediction target for the Schrödinger Gauge Difference Forecast.
-    
-    Target: Öd(τ) at time τ.
+    Target: Öd(t) 
     
     Args:
         historical_data (pd.DataFrame): Dataframe containing 'Öd'.
-        k (int): Lookback window (unused, kept for compatibility).
+        k (int): Lookback window (kept for interface compatibility).
         
     Returns:
         np.array: Target values for the current time step.
     """
-    # The target is the current gauge difference Öd(t)
+    # We extract the 'Öd' column. 
+    # In the training pipeline, this will be aligned with inputs from t-1.
     return historical_data['Öd'].values
 
 def create_inputs(historical_data, k=14):
     """
-    Creates the input features for the Schrödinger Gauge Difference Forecast.
-    
-    Features: Last k schrödinger gauge differences [Öd(t-1), Öd(t-2), ..., Öd(t-k)].
+    Creates the input features using a lagged window to prevent leakage.
+    Features: [Öd(t-1), Öd(t-2), ..., Öd(t-k)]
     
     Args:
         historical_data (pd.DataFrame): Dataframe containing 'Öd'.
@@ -57,14 +57,14 @@ def create_inputs(historical_data, k=14):
     Returns:
         np.array: 2D array of lagged gauge differences.
     """
-    # Features consist of the last k gauge differences
-    # We create a sequence of lags from t-1 back to t-k
-    # shift(i) moves data down by i, so row t contains value from t-i
-    lags = [historical_data['Öd'].shift(i) for i in range(1, k + 1)]
+    # Create a list of Series, each shifted by an incrementing lag.
+    # shift(1) ensures the model never sees the target Öd(t) during training.
+    lags = []
+    for i in range(1, k + 1):
+        lags.append(historical_data['Öd'].shift(i))
     
-    X = np.column_stack(lags)
-    X = np.nan_to_num(X)
+    # Concatenate lags column-wise
+    df_inputs = pd.concat(lags, axis=1)
     
-    # Reshape from (samples, k) to (samples, k, 1) to match Input(shape=(k, 1))
-    return np.expand_dims(X, axis=-1)
-    
+    # Return as a numpy array for the Neural Network
+    return df_inputs.values

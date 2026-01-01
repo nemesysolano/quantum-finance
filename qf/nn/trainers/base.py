@@ -3,7 +3,6 @@ import qf.market as mkt
 import numpy as np
 import mplfinance as mpf
 from qf.quantum.estimators import quantum_energy_levels, quantum_lambda
-from qf.stats.distributions import empirical_distribution
 import qf.nn as nn
 import tensorflow as tf
 import os

@@ -1,0 +1,5 @@
+Failed to import data for ECDA: sub_sqrt is nan. Aborting calculation.
+Failed to import data for QBTS: sub_sqrt is nan. Aborting calculation.
+Failed to import data for HYG: sub_sqrt is nan. Aborting calculation.
+Failed to import data for SOBR: sub_sqrt is nan. Aborting calculation
+Failed to import data for AMCI: sub_sqrt is nan. Aborting calculation.

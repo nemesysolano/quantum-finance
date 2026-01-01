@@ -1,9 +1,9 @@
 import numpy as np
 import pandas as pd
 
+
 from qf.quantum import quantum_lambda
 from qf.quantum import maximum_energy_level, minimum_energy_level
-from qf.stats import empirical_distribution
 
 def add_breaking_gap(historical_data, Q=0.0001):
     """
@@ -170,7 +170,7 @@ def add_directional_probabilities(historical_data, epsilon=9**-5):
             
     df['P↑'] = p_up
     df['P↓'] = p_down
-    
+    df.dropna(inplace=True)
     return df
 
 
@@ -412,7 +412,7 @@ def add_bar_inbalance(historical_data):
     
     # Cleanup to prevent NaN errors in Neural Network
     df[['Im', 'Id']] = df[['Im', 'Id']].fillna(0.0)
-    
+    df.dropna(inplace=True)
     return df
 
 def add_probability_differences(historical_data):
@@ -433,7 +433,7 @@ def add_probability_differences(historical_data):
     # P↑: Likelihood of upward move
     # P↓: Likelihood of downward move
     df['Pd'] = df['P↑'] - df['P↓']
-    
+    df.dropna(inplace=True)
     return df
 
 
@@ -499,26 +499,47 @@ def add_wavelet_differences(historical_data):
     
     return df
 
+def add_quantum_lambda(ticker, historical_data, lookback_periods):
+    """
+    Calculates the quantum lambda (λ) using an fixed window to prevent data leakage.
+    Uses the logarithmic filter of the squared serial difference of the close price.
+    """
+    df = historical_data
+    n = len(df)
+    lambdas = np.full(n, np.nan)
+    
+    # 1. Calculate filtered returns: rho(Delta^2(Close, 1))
+    c = df['Close'].values
+    c_prev = df['Close'].shift(1).values
+    return_p = c / c_prev
+    
+    # 2. Fixed window calculation (using data from T up to t-1 for bar t)
+    T = 1
+    for t in range(lookback_periods, n):      
+        lambdas[t] = quantum_lambda(return_p[T:t])# [T:t]
+        T += 1
+        
+    df['λ'] = lambdas
+    df.dropna(inplace=True)
+    return df
 
-
-def add_boundary_energy_levels(historical_data: pd.DataFrame, quantization_level):
+def add_boundary_energy_levels(historical_data: pd.DataFrame):
     """
     Calculates and adds the quantum boundary energy levels (E_low, E_high)
     based on the empirical distribution of daily close price ratios (simple returns).
     """
     # Price Ratio (Simple Return) = P(t) / P(t-1)
-    daily_returns = (historical_data['Close'] / historical_data['Close'].shift(1)).dropna()
-    empirical_dist = empirical_distribution(daily_returns, quantization_level)
-    λ = quantum_lambda(empirical_dist['X'], empirical_dist['P'])
-    print(f"Computed quantum lambda: {λ}")
-    lower_boundaries = np.vectorize(lambda x: maximum_energy_level(x, λ))
-    upper_boundaries = np.vectorize(lambda x: minimum_energy_level(x, λ))
-    historical_data['E_Low'] = lower_boundaries(historical_data['Low'])
-    historical_data['E_High'] = upper_boundaries(historical_data['High'])
-
-    historical_data['E_Low'] = historical_data['E_Low'].fillna(
-        historical_data['Close'] - np.abs(historical_data['High'] - historical_data['Close'])
-    )
+    λ = historical_data['λ']
+    
+    lower_boundaries = np.vectorize(maximum_energy_level)
+    upper_boundaries = np.vectorize(minimum_energy_level)
+    historical_data['E_Low'] = lower_boundaries(historical_data['Low'], λ)
+    historical_data['E_High'] = upper_boundaries(historical_data['High'], λ)
+    historical_data.dropna(inplace=True)
+    
+    # historical_data['E_Low'] = historical_data['E_Low'].fillna(
+    #     historical_data['Close'] - np.abs(historical_data['High'] - historical_data['Close'])
+    # )
 
 
 def add_scrodinger_gauge(historical_data):

@@ -1,3 +1,4 @@
+import time
 import pandas as pd
 import yfinance as yf
 import os
@@ -5,7 +6,7 @@ import re
 from datetime import datetime, timedelta
 
 from qf import context
-from qf.market.augmentation import add_bar_inbalance, add_boundary_energy_levels, add_breaking_gap, add_directional_probabilities, add_price_time_angles, add_price_volume_differences, add_price_volume_oscillator, add_probability_differences, add_scrodinger_gauge, add_scrodinger_gauge_differences, add_swing_ratio, add_wavelet_differences, add_wavelets
+from qf.market.augmentation import add_bar_inbalance, add_boundary_energy_levels, add_breaking_gap, add_directional_probabilities, add_price_time_angles, add_price_volume_differences, add_price_volume_oscillator, add_probability_differences, add_quantum_lambda, add_scrodinger_gauge, add_scrodinger_gauge_differences, add_swing_ratio, add_wavelet_differences, add_wavelets
 base_meta_border = 0.80
 
 def read_csv(path):
@@ -30,7 +31,8 @@ def import_market_data(symbol, quantization_level, interval, lookback_periods = 
 
     if not os.path.exists(data_dir):
         os.makedirs(data_dir)
-   
+    
+    start_time = time.time()
     if not os.path.exists(output_path):
         ticker = yf.Ticker(symbol)     
 
@@ -40,9 +42,8 @@ def import_market_data(symbol, quantization_level, interval, lookback_periods = 
             historical_data = ticker.history(interval=interval, start=start_date, end=end_date)
         else:              
             historical_data = ticker.history("10y")  
-        # Rename Date column to Datetime column just in case
-        historical_data.index.name = 'Date'
         
+        historical_data.index.name = 'Date'        
         historical_data.to_csv(output_path)        
         remove_timezone_from_json_dates(output_path, interval)
         historical_data = read_csv(output_path)
@@ -56,16 +57,17 @@ def import_market_data(symbol, quantization_level, interval, lookback_periods = 
         add_price_volume_differences(historical_data)
         add_probability_differences(historical_data)
         add_wavelet_differences(historical_data)
-        add_boundary_energy_levels(historical_data, quantization_level)
+        add_quantum_lambda(ticker, historical_data, lookback_periods)
+        add_boundary_energy_levels(historical_data)
         add_scrodinger_gauge(historical_data)
         add_scrodinger_gauge_differences(historical_data)
         add_bar_inbalance(historical_data)
         historical_data.to_csv(output_path)
-        
+
     return read_csv(output_path)
 
 
-def import_market_all_data():    
+def import_market_all_data(quantization_level, interval, lookback_periods):    
     module_dir = os.path.dirname(__file__)
     stock_listing_file = os.path.join(module_dir, 'stocks.txt')
 
@@ -73,16 +75,18 @@ def import_market_all_data():
         symbols = [line.strip() for line in f]
     
     for symbol in symbols:
+        start_time = time.time()
         try:
             print(f"Importing data for {symbol}...")
-            import_market_data(symbol)
+            import_market_data(symbol, quantization_level, interval, lookback_periods)
             print(f"Data for {symbol} imported successfully.")
         except Exception as e:
             output_path = os.path.join(module_dir, 'data', f"{symbol}.csv")
             if os.path.exists(output_path):
                 os.remove(output_path)
             print(f"Failed to import data for {symbol}: {e}")
-
+        print(f"{symbol} Time elapsed: {time.time() - start_time} seconds")
+  
 def read_datasets(symbol):
     module_dir = os.path.dirname(__file__)
     data_dir = os.path.join(module_dir, 'data')
