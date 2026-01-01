@@ -3,4 +3,4 @@ barinbalance *
 gauge 
 pricevoldiff
 probdiff *
-wavelets
+wavelets *
