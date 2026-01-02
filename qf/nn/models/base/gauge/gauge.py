@@ -43,7 +43,8 @@ def create_targets(historical_data, k=14):
     """
     # We extract the 'Öd' column. 
     # In the training pipeline, this will be aligned with inputs from t-1.
-    return historical_data['Öd'].values
+    # Drop the first k rows to align with inputs (which lose k rows due to shifting)
+    return historical_data['Öd'].iloc[k:].values
 
 def create_inputs(historical_data, k=14):
     """
@@ -60,11 +61,15 @@ def create_inputs(historical_data, k=14):
     # Create a list of Series, each shifted by an incrementing lag.
     # shift(1) ensures the model never sees the target Öd(t) during training.
     lags = []
-    for i in range(1, k + 1):
-        lags.append(historical_data['Öd'].shift(i))
+    for i in range(1, k + 1):        
+        shifted = historical_data['Öd'].shift(i)
+        lags.append(shifted)
     
     # Concatenate lags column-wise
     df_inputs = pd.concat(lags, axis=1)
+    
+    # Drop rows with NaNs (introduced by shifting)
+    df_inputs = df_inputs.dropna()
     
     # Return as a numpy array for the Neural Network
     return df_inputs.values
