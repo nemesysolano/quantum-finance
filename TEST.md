@@ -4,7 +4,7 @@ Scrodinger Gauge Difference and Differentiated Time Series and be used to predic
 
 gauge 
 
-pricevoldiff
+**pricevol**
 
 **probdiff**
 
