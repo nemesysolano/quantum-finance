@@ -20,8 +20,23 @@ $Δ(x(t), k) = Δ_\%(x(t-k), x(t))$ where $k$ is a non-negative integer.
 
 $Δ^2(x(t), k) = [Δ(x(t), k)]^2$
 
+### Logarithmic Difference (or Log-Return) ###
 
-### Logaritmic filter ###
+Let $a$ and $b$ be _strictly positive_ real numbers ($a,b > 0$). **The Log-Return** is defined as
+
+$L(a,b) = \mathbf{ln}(\frac{b}{a})$
+
+Along the same lines as **serial difference**, we can define the **logarithmic serial difference** as:
+
+$L(x(t), k) = L(x(t-k), x(t))$.
+
+---
+Let's highlight some important points about $L(a,b)$:
+
+1. Logarithmic Differences typically exhibit heavy tails and are not strictly normally distributed.
+2. When making inference with L(a,b), especially with short samples (10 to 30 elements), the Student-t distribution is often used to better model the observed kurtosis.
+
+### Logarithmic filter ###
 
  $ρ(x) = \frac{2}{\log{2}} \frac{\log(1+x)}{1+x}$ where,
  
@@ -36,7 +51,7 @@ Consider two elements $x(t)$ and $x(t-k)$ from strictly positive time series $x$
 $δ(x(t), k) = ρ(\max(\frac{x(t)}{x(t-k)}, ε))$
 ---
 
-if $k = 1$ we can rewrite serial difference, squared serial difference and serial bounded ratio as $Δ(x(t))$, $Δ^2(x(t))$ and $δ(x(t))$ respectively.
+if $k = 1$ we can rewrite serial difference, squared serial difference, serial bounded ratio and logarithmic serial differenceas $Δ(x(t))$, $Δ^2(x(t))$, $δ(x(t))$ and $L(x(t))$ respectively.
 
 
 ## The Breaking Gap ##
@@ -394,35 +409,54 @@ $x_q = \lfloor(10^q)p\rfloor$ where $q$ is a positive integer and $\lfloor・\rf
 
 Finance engineers must choose a $q$ integer large enough such that $\lfloor・\rfloor$ operation doesn't result into 0.
 
-### Empirical Distribution ###
+### The Student-T Distribution ###
 
-Let $X_n = \{x_q(0), ..., x_q(n-1)\}$ be a quantized sequence of length $n$. The **support set** (or **set of unique values**) of $X_n$, containing all and only the elements **occurring** in $X_n$, is denoted as $X^*_n$. Note the difference between a sequence (which allows repeated elements) and a set (which contains only unique elements).
+The Student-t distribution serves as a robust generalization of the standard normal distribution, characterized by heavier tails and a symmetric, bell-shaped profile..
 
-If the support set is $X^*_n = \{ξ(0), ..., ξ(z-1)\}$ (where $z$ is the number of unique elements), and $c(ξ(j))$ is the count (frequency) of the unique value $ξ(j)$ in the sequence $X_n$, then the **Empirical Probability Mass Function (PMF)** for $X_n$ is defined by the set of probabilities:
+#### Probability Density Function ####  
 
-$P(X_n) = \left\{ \frac{c(ξ(0))}{n}, ..., \frac{c(ξ(z-1))}{n} \right\} = \left\{ φ_0, ..., φ_{z-1}) \right\}$.
+The Student-T distribution has the **probability density function (pdf)** given by
 
-Moving forward, we will assume that $P(X_n)$ is sorted for ease of reference and calculation.
+$f(t,ν) = \frac{Γ(\frac{ν+1}{2})}{\sqrt{πν} Γ(\frac{ν}{2})}(1+\frac{t^2}{ν})^{-(ν+1)/2}$, where 
 
-#### Chasing $λ$ via Empirical Distribution ####
+1. $ν$ is the number of degrees of freedom and
+2. $Γ$ is the gamma function,
 
-The empirical distribution is a **practical tool** for estimating the coupling constant $λ$ required by the **cubic anharmonic equation**.
+---
+Bear in mind that $t$ in the context of the Student-T pdf formula is a random variable belonging to the Student-T distribution.
 
-Let $P(X_n) = \{φ_0, \dots, φ_{z-1}\}$ be the sorted Empirical Probability Mass Function, and let $X^*_n = \{\xi_0, \dots, \xi_{z-1}\}$ be the corresponding set of sorted quantized values (where $φ_j$ is the probability of the quantized value $\xi_j$).
+#### Cumulative Distribution Function ####
 
-We first find the index $k$ such that $φ_k = \max \{ φ_j : 0 \le j \le z-1 \}$ (i.e., $k$ is the index of the mode).
+The Student-T distribution has the **cumulative distribution function (cdf)** given by
 
-The constant $λ$ can be approximated by observing the mode of the empirical distribution, specifically using the value-probability pairs adjacent to the mode. The approximation is given by:
+$F(t,ν) = 1-\frac{1}{2} I_{x(t)} (\frac{ν}{2}, \frac{1}{2})$
 
-$λ \approx \left| \frac{ \xi_{k-1}^2 φ_{k-1} - \xi_{k+1}^2 φ_{k+1} }{ \xi_{k+1}^4 φ_{k+1} - \xi_{k-1}^4 φ_{k-1} } \right|$
+where $I$ is the incomplete beta function and 
+
+$x(t) = \frac{k}{t^2 + k}$
+
+#### Estimating $λ$ via the Student-t Distribution ####
+
+The Student-T distribution is a practical tool for estimating the coupling constant $λ$ required by the **cubic anharmonic equation**.
+
+Let $\{L(x(τ-k)), \dots, L(x(τ-1))\}$ be a sample sequence of Log-Returns, which we can model (as we already know) with the Student-t distribution.
+
+The constant $λ$ can be approximated with this formula:
+
+$λ \approx \left| \frac{ L^2_0 f(L_0,ν) - L^2_1 f(L_1,ν) }{ L^4_1 f(L_1,ν) - L^4_0 f(L_0,ν) } \right|$, where
+
+1. $L_0 = -σ$,
+2. $L_1 =  σ$,
+3. $ν = $ degrees of freedom and
+4. $f(L,ν)$ = pdf for Student-T distribution.
 
 This method is based on equating the Quantum Finance Schrödinger Equation (anharmonic oscillator) potential to the observed empirical distribution around its peak.
 
-#### The Schrödinger Gauge ####
+#### The Schrödinger Gauge #### 
 
 We define the **Schrödinger Gauge** $Ö(t)$ at time $t$ as:
 
-$Ö(t) =  Δ_\%(Ö↓(t),Ö↑(t))$
+$Ö(t) =   Δ_\%(Ö↓(t),Ö↑(t))$
 
 where:
 
@@ -442,13 +476,13 @@ The **Schrödinger Gauge** $Ö(t)$ acts as a quantum-aware volatility and moment
 
 ## Quantum Forecast Models ##
 
-### Schrödinger Gauge Difference Forecast ###
+### Schrödinger Gauge Forecast ###
 
-This model forecasts schrödinger gauge difference $Ö_d(τ)$ at time $τ$.
+This model forecasts schrödinger gauge $Ö(τ)$ at time $τ$.
 
 ##### Prediction Target #####
 
-Schrödinger gauge difference $Ö_d(τ)$ at time $τ$.
+Schrödinger gauge $Ö(τ)$ at time $τ$.
 
 ##### Input Features #####
 
@@ -456,9 +490,7 @@ Last $k$ schrödinger gauge differences.
 
 | $t-1$ | $t-2$ | ... | $t-k$ |
 | :--- | :--- | :--- | :--- |
-| $Ö_d(t-1)$ | $Ö_d(t-2)$ | ... | $Ö_d(t-k)$ |
-
-where $Ö_d(τ) = \frac {Ö(τ) - Ö(τ-1)}{2}$
+| $Ö(t-1)$ | $Ö(t-2)$ | ... | $Ö(t-k)$ |
 
 ## The Meta Model ##
 
