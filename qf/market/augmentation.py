@@ -511,7 +511,7 @@ def add_quantum_lambda(ticker, historical_data, lookback_periods):
     # 1. Calculate filtered returns: rho(Delta^2(Close, 1))
     c = df['Close'].values
     c_prev = df['Close'].shift(1).values
-    return_p = c / c_prev
+    return_p = np.log(c / c_prev)
     
     # 2. Fixed window calculation (using data from T up to t-1 for bar t)
     T = 1
