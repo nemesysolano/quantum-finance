@@ -364,7 +364,6 @@ def add_bar_inbalance(historical_data):
     df = historical_data
     prices = df['Close'].values
     n = len(prices)
-    
     # --- 1. Calculate Balance Rule b(t) ---
     b = np.zeros(n)
     b[0] = np.sign(prices[0]) if prices[0] != 0 else 1.0
@@ -530,16 +529,14 @@ def add_boundary_energy_levels(historical_data: pd.DataFrame):
     """
     # Price Ratio (Simple Return) = P(t) / P(t-1)
     λ = historical_data['λ']
-    
     lower_boundaries = np.vectorize(maximum_energy_level)
     upper_boundaries = np.vectorize(minimum_energy_level)
     historical_data['E_Low'] = lower_boundaries(historical_data['Low'], λ)
     historical_data['E_High'] = upper_boundaries(historical_data['High'], λ)
-    historical_data.dropna(inplace=True)
-    
-    # historical_data['E_Low'] = historical_data['E_Low'].fillna(
-    #     historical_data['Close'] - np.abs(historical_data['High'] - historical_data['Close'])
-    # )
+    # historical_data.dropna(inplace=True)
+    historical_data['E_Low'] = historical_data['E_Low'].fillna(
+        historical_data['Close'] - np.abs(historical_data['High'] - historical_data['Close'])
+    )
 
 
 def add_scrodinger_gauge(historical_data):
@@ -547,7 +544,7 @@ def add_scrodinger_gauge(historical_data):
     Calculates the Schrödinger Gauge (Ö) based on the current price 
     and the quantum boundary energy levels.
     
-    Formula: Ö(t) = [2*C(t) - (E_high + E_low)] / (E_high - E_low)
+    Formula: $Ö(t) = \log (C(t) /\sqrt(E_{low}(t) * E_{high}(t)$
     
     Args:
         historical_data (pd.DataFrame): Dataframe containing 'Close', 
@@ -563,17 +560,8 @@ def add_scrodinger_gauge(historical_data):
     e_low = df['E_Low'].values
     e_high = df['E_High'].values
     
-    # Calculate the Schrödinger Gauge
-    # This centers the price between the boundaries:
-    # Ö = 1.0  at the Upper Boundary (E_High)
-    # Ö = -1.0 at the Lower Boundary (E_Low)
-    # Ö = 0.0  at the equilibrium point
-    numerator = (2 * c) - (e_high + e_low)
-    denominator = e_high - e_low + 1e-9 # Epsilon for stability
-    
-    df['Ö'] = numerator / denominator
-    
-    # Ensure any division by zero or NaN is handled
+    e_equilibrium = np.sqrt(e_low * e_high)
+    df['Ö'] = np.log(c / e_equilibrium)
     df.dropna(inplace=True)
     
     return df
@@ -603,5 +591,11 @@ def add_scrodinger_gauge_differences(historical_data):
     
     # Fill the initial NaN resulting from the shift
     df.dropna(inplace=True)
-    
+    return df
+
+def add_scrodinger_gauge_acceleration(historical_data):
+    # Acceleration is the difference of the difference
+    df = historical_data
+    df['Ödd'] = (df['Öd'] - df['Öd'].shift(1)) / 2
+    df.dropna(inplace=True)
     return df

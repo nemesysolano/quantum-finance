@@ -66,8 +66,10 @@ def base_trainer(args):
     Y_pred = np.int32(np.sign(Y_pred_raw)).flatten()
     Y_expected = np.int32(np.sign(Y_test)).flatten()
 
+    
     matching  = Y_pred == Y_expected
     different = Y_pred != Y_expected
+    print(np.count_nonzero(matching), np.count_nonzero(different), len(Y_pred), len(Y_pred_raw), len(Y_expected), len(X_test_scaled))
     matching_pct = np.count_nonzero(matching) / len(Y_pred)
     different_pct = np.count_nonzero(different) / len(Y_pred)
 

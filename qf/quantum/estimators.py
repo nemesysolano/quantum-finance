@@ -56,7 +56,9 @@ def estimate_studen_t(time_series):
     # 1. Initial Guesses (Method of Moments)
     # These provide a "warm start" for the optimizer, speeding up convergence.
     mu_init = np.mean(data)
+    mean = mu_init
     sigma_init = np.std(data)
+    std = sigma_init
     nu_init = 4.0 # 4 is a safe starting point for financial returns (fat tails)
     
     initial_params = [mu_init, sigma_init, nu_init]
@@ -75,18 +77,16 @@ def estimate_studen_t(time_series):
     )
     
     mu, sigma, nu = result.x
-    return mu, sigma, nu
+    return mu, sigma, nu, mean, std
 
 def quantum_lambda(return_p):    
-    μ, σ, ν = estimate_studen_t(return_p)
-    α = 0.00975
-
-    ξ0  = μ * (1-α)
-    φ0 = scaled_φ(ξ0, μ, σ, ν)
-    ξ1  = μ * (1+α)
-    φ1 = scaled_φ(ξ1, μ, σ, ν)    
-    L = np.abs(ξ0**2 * φ0 - ξ1**2 * φ1)/(1e-9 + np.abs(ξ1**4 * φ1 - ξ0**4 * φ0))
-    # print(return_p[0], L)
+    μ, σ, ν, _, std = estimate_studen_t(return_p)
+    s = std if np.isnan(σ) else std
+    L0  = s
+    f0 = scaled_φ(L0, μ, s, ν)
+    L1  = -s
+    f1 = scaled_φ(L1, μ, s, ν)    
+    L = np.abs(L0**2 * f0 - L1**2 * f1)/(1e-9 + np.abs(L1**4 * f1 - L0**4 * f0))
     return L
 
     

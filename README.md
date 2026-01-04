@@ -456,41 +456,42 @@ This method is based on equating the Quantum Finance Schrödinger Equation (anha
 
 We define the **Schrödinger Gauge** $Ö(t)$ at time $t$ as:
 
-$Ö(t) =   Δ_\%(Ö↓(t),Ö↑(t))$
+$Ö(t) =  \log (C(t) /\sqrt {(E^{(n_1)} * E^{(n_2)}(t))})$
 
 where:
 
-1. $Ö↑(t) = E^{(n_2)}-c(t)$
-2. $Ö↓(t) = c(t)-E^{(n_1)}$
-3. $E^{(n_1)}$ is the largest energy eigenvalue strictly less than $c(t)$: $E^{(n_1)} = \max \{E^{(n)} : E^{(n)} < c(t)\}$
-4. $E^{(n_2)}$ is the smallest energy eigenvalue strictly greater than $c(t)$: $E^{(n_2)} = \min \{E^{(n)} : E^{(n)} > c(t)\}$
-5. $c(t)$ is the closing price at time $t$.
+1. $E^{(n_1)}$ is the largest energy eigenvalue strictly less than $c(t)$: $E^{(n_1)} = \max \{E^{(n)} : E^{(n)} < c(t)\}$
+2. $E^{(n_2)}$ is the smallest energy eigenvalue strictly greater than $c(t)$: $E^{(n_2)} = \min \{E^{(n)} : E^{(n)} > c(t)\}$
+3. $c(t)$ is the closing price at time $t$.
 
-The **Schrödinger Gauge** $Ö(t)$ acts as a quantum-aware volatility and momentum indicator governing the asset's movement at time $t$. For language convenience, we will refer to $E^{(n_1)}$ and $E^{(n_2)}$ as **boundary energy levels**.
+#### The Schrödinger Gauge Difference #### 
 
-| Gauge Value Range | Gauge Sign ($Ö(t)$) | Price Location Relative to Boundaries | Correlated Price Direction ($r_p(t)$) | **Contrarian Trade Signal** |
-| :---: | :---: | :--- | :---: | :---: |
-| $[0, 1]$ | **Positive** ($Ö(t)>0$) | Closer to the **Upper Boundary** ($E^{(n_2)}$) | Downwards ($\downarrow$) | **SELL** (Short) |
-| $[-1, 0]$ | **Negative** ($Ö(t)<0$) | Closer to the **Lower Boundary** ($E^{(n_1)}$) | Upwards ($\uparrow$) | **BUY** (Long) |
+$Ö_d(t) = Ö(t) - Ö(t-1)$
 
+#### The Schrödinger Gauge Acceleration #### 
+
+$Ö_a(t) = Ö_a(t) - Ö_a(t-1)$
 
 ## Quantum Forecast Models ##
 
-### Schrödinger Gauge Forecast ###
+### Schrödinger Gauge Difference Forecast ###
 
-This model forecasts schrödinger gauge $Ö(τ)$ at time $τ$.
+This model forecasts schrödinger gauge difference $Ö_d(τ)$ at time $τ$.
 
 ##### Prediction Target #####
 
-Schrödinger gauge $Ö(τ)$ at time $τ$.
+Schrödinger gauge difference $Ö_d(τ)$ at time $τ$.
 
 ##### Input Features #####
 
-Last $k$ schrödinger gauge differences.
+Last $k$ schrödinger gauge differences $Ö_d$ and accelerations $Ö_a$ illustratd in the next table:
 
-| $t-1$ | $t-2$ | ... | $t-k$ |
-| :--- | :--- | :--- | :--- |
-| $Ö(t-1)$ | $Ö(t-2)$ | ... | $Ö(t-k)$ |
+|k|$Ö_d(i)$  |$Ö_a(i)$. |
+|-|----------|----------|
+|1|$Ö_d(τ-1)$|$Ö_a(τ-1)$|
+|2|$Ö_d(τ-2)$|$Ö_a(τ-2)$|
+|.|..........|..........|
+|k|$Ö_d(τ-k)$|$Ö_a(τ-k)$|
 
 ## The Meta Model ##
 
