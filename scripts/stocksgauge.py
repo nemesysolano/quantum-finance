@@ -13,7 +13,10 @@ import numpy as np
 from qf.nn.models.base.gauge.metafeatures import train_gauge_meta_ensemble
 keras = tf.keras
 
-def simulate_trading_no_hedge(y_test, probs, physics_test, initial_cap=10000, slippage_bps=5):
+def random_slipage(lower, upper):
+    return np.random.uniform(lower, upper)
+
+def simulate_trading_no_hedge(y_test, physics_test, initial_cap=10000):    
     cash = initial_cap
     equity_curve = [initial_cap]
     longs, shorts = 0, 0
@@ -31,14 +34,14 @@ def simulate_trading_no_hedge(y_test, probs, physics_test, initial_cap=10000, sl
 
     # Convert basis points to a decimal multiplier (e.g., 2bps = 0.0002)
     # This represents the cumulative friction for a round-trip trade
-    slippage_cost = slippage_bps / 10000
-
+    
     # Start from 0, but evaluate outcome at i + 1
     # We stop at len(probs) - 1 to avoid index out of bounds
-    for i in range(len(probs) - 1):
-        p_score = probs[i]
+    for i in range(len(y_actual) - 1):
+        slippage_cost = random_slipage(5, 10) / 10000
+
         # Dynamic Threshold calculation
-        threshold = (0.40 * np.abs(o_d[i])) + (0.60 * o_dd[i])
+        threshold = np.int(np.sign(o_d[i]) + np.sign(o_dd[i]))
         
         # Reference price/ATR at time of signal (t)
         # Outcome is the move from t to t+1
@@ -49,7 +52,7 @@ def simulate_trading_no_hedge(y_test, probs, physics_test, initial_cap=10000, sl
         lower_distance = current_price - e_low[i]
 
         # 1. LONG SIGNAL
-        if threshold > 0 and p_score > 0.65:
+        if threshold == 2:
             longs += 1
             tp = min(yesterday_atr,upper_distance)
             sl = -min(0.33 * yesterday_atr, lower_distance)
@@ -69,7 +72,7 @@ def simulate_trading_no_hedge(y_test, probs, physics_test, initial_cap=10000, sl
                 else: loser_longs += 1
 
         # 2. SHORT SIGNAL
-        elif threshold < 0 and p_score < 0.35: # Assuming symmetric threshold logic
+        elif threshold == -2:
             shorts += 1
             tp = -min(yesterday_atr, lower_distance)
             sl = 0.33 * min(yesterday_atr, upper_distance)
@@ -149,7 +152,7 @@ def back_test(params):
     _, _, _, meta_train, meta_test = mkt.create_datasets(historical_dataset)
     _, X_test, y_test, probs = train_gauge_meta_ensemble(meta_train, meta_test)
     physics_test = historical_dataset.loc[X_test.index, ['Ö', 'Öd', 'Ödd', 'ATR','E_High', 'E_Low', 'Close']]
-    equity_curve, cash, longs, shorts, winner_longs, loser_longs, winner_shorts, loser_shorts = simulate_trading_no_hedge1(y_test, probs, physics_test)
+    equity_curve, cash, longs, shorts, winner_longs, loser_longs, winner_shorts, loser_shorts = simulate_trading_no_hedge(y_test, physics_test)
     stats = create_backtest_stats(ticker, equity_curve, cash, longs, shorts, winner_longs, winner_shorts, loser_longs, loser_shorts)
     return stats
 
