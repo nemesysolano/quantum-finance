@@ -17,7 +17,7 @@ def base_trainer(args):
     ticker = args.ticker.upper()
     quantization_level = args.quantization_level    
     interval = args.interval
-    historical_data = mkt.import_market_data(ticker, quantization_level, interval)
+    historical_data = mkt.import_market_data(ticker, interval)
     patience = args.patience
     model_factory_name = args.model
     epochs = args.epochs

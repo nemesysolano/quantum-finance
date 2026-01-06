@@ -111,7 +111,7 @@ def meta_trainer_run(ticker, trainer, quantization_level, interval):
         'loser_threshold': 0.70
     }
 
-    data = mkt.import_market_data(ticker, quantization_level, interval)        
+    data = mkt.import_market_data(ticker, interval)        
     base_models = load_base_models(ticker)
     magnitude_thresholds = [5e-5, 0.001, 0.003, 0.005, 0.010, 0.015, 0.020, 0.030]
     

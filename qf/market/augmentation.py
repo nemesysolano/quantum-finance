@@ -522,22 +522,21 @@ def add_quantum_lambda(ticker, historical_data, lookback_periods):
     df.dropna(inplace=True)
     return df
 
-def add_boundary_energy_levels(historical_data: pd.DataFrame):
+def add_boundary_energy_levels(df, window=14):
     """
-    Calculates and adds the quantum boundary energy levels (E_low, E_high)
-    based on the empirical distribution of daily close price ratios (simple returns).
+    Causal 14-day Rolling Energy Levels.
+    Prevents the 'Physics' from knowing future price extremes.
     """
-    # Price Ratio (Simple Return) = P(t) / P(t-1)
-    λ = historical_data['λ']
-    lower_boundaries = np.vectorize(maximum_energy_level)
-    upper_boundaries = np.vectorize(minimum_energy_level)
-    historical_data['E_Low'] = lower_boundaries(historical_data['Low'], λ)
-    historical_data['E_High'] = upper_boundaries(historical_data['High'], λ)
-    # historical_data.dropna(inplace=True)
-    historical_data['E_Low'] = historical_data['E_Low'].fillna(
-        historical_data['Close'] - np.abs(historical_data['High'] - historical_data['Close'])
-    )
-
+    # Use rolling window for local max/min
+    df['Rolling_Max'] = df['Close'].rolling(window=window).max()
+    df['Rolling_Min'] = df['Close'].rolling(window=window).min()
+    
+    # Calculate energy levels row-by-row using ONLY previous 14 days
+    df['E_High'] = df.apply(lambda x: maximum_energy_level(x['Rolling_Max'], x['λ']), axis=1)
+    df['E_Low'] = df.apply(lambda x: minimum_energy_level(x['Rolling_Min'], x['λ']), axis=1)
+    
+    df.drop(columns=['Rolling_Max', 'Rolling_Min'], inplace=True)
+    return df
 
 def add_scrodinger_gauge(historical_data):
     """

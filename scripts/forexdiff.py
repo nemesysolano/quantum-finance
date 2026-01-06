@@ -369,60 +369,60 @@ def create_backtest_stats(
 def back_test(params):
     (k, ticker, quantization_level, interval, trader_name) = params
     trader = traders[trader_name]
-    # try:
-    data = mkt.import_market_data(ticker, quantization_level, interval)
+    try:
+        data = mkt.import_market_data(ticker, interval,)
+            
+        # Generate Inputs and Targets
+        X_est, X_tar, S_tar, anchors, h_tar, l_tar, energy_high_target, energy_low_target = create_inputs(data, k)
+        y_actual = create_targets(data, k)
+        # Calculate ATR history for the whole series
+        atr_history = frac.get_atr(y_actual, window=14)
+
+        # Forecasting
+        y_preds, _, pred_deltas = estimate_y(X_est, X_tar, anchors, k)
         
-    # Generate Inputs and Targets
-    X_est, X_tar, S_tar, anchors, h_tar, l_tar, energy_high_target, energy_low_target = create_inputs(data, k)
-    y_actual = create_targets(data, k)
-    # Calculate ATR history for the whole series
-    atr_history = frac.get_atr(y_actual, window=14)
+        # Align to the length of predictions
+        n = len(y_preds)
+        assert len(pred_deltas) == n
+        assert len(y_actual) == n + 1
 
-    # Forecasting
-    y_preds, _, pred_deltas = estimate_y(X_est, X_tar, anchors, k)
-    
-    # Align to the length of predictions
-    n = len(y_preds)
-    assert len(pred_deltas) == n
-    assert len(y_actual) == n + 1
+        goodness = report_goodness_of_fit(
+            y_actual[:n], 
+            y_preds, 
+            pred_deltas, 
+            anchors[:n] # Pass anchors for correct return calculation
+        )
+        
+        # FIX: Remove d_history and align h_tar/l_tar correctly
+        # Inside back_test(params):
+        (
+            equity, final, longs, shorts, winner_longs, winner_shorts, loser_longs, loser_shorts, 
+            max_buy_win_val, max_buy_loss_val, max_sell_win_val, max_sell_loss_val,
+            largest_hold_buy_winner_time, largest_hold_buy_loser_time, largest_hold_sell_winner_time, largest_hold_sell_loser_time                
+        ) = trader(
+            y_actual[:n], 
+            anchors[:n], # REPLACED S_tar with anchors
+            y_preds, 
+            h_tar[:n], 
+            l_tar[:n],
+            energy_high_target[:n],
+            energy_low_target[:n],
+            pred_deltas,
+            atr_history
+        )
+        # y_actual, S_tar, y_preds, h_target, l_target, e_high, e_low, pred_deltas, atr_history, initial_cap=10000
 
-    goodness = report_goodness_of_fit(
-        y_actual[:n], 
-        y_preds, 
-        pred_deltas, 
-        anchors[:n] # Pass anchors for correct return calculation
-    )
-    
-    # FIX: Remove d_history and align h_tar/l_tar correctly
-    # Inside back_test(params):
-    (
-        equity, final, longs, shorts, winner_longs, winner_shorts, loser_longs, loser_shorts, 
-        max_buy_win_val, max_buy_loss_val, max_sell_win_val, max_sell_loss_val,
-        largest_hold_buy_winner_time, largest_hold_buy_loser_time, largest_hold_sell_winner_time, largest_hold_sell_loser_time                
-    ) = trader(
-        y_actual[:n], 
-        anchors[:n], # REPLACED S_tar with anchors
-        y_preds, 
-        h_tar[:n], 
-        l_tar[:n],
-        energy_high_target[:n],
-        energy_low_target[:n],
-        pred_deltas,
-        atr_history
-    )
-    # y_actual, S_tar, y_preds, h_target, l_target, e_high, e_low, pred_deltas, atr_history, initial_cap=10000
-
-    stats = create_backtest_stats(
-        ticker,
-        equity, final, longs, shorts, winner_longs, winner_shorts, loser_longs, loser_shorts, 
-        max_buy_win_val, max_buy_loss_val, max_sell_win_val, max_sell_loss_val,
-        largest_hold_buy_winner_time, largest_hold_buy_loser_time, largest_hold_sell_winner_time, largest_hold_sell_loser_time                
-    )
-    print(f"Finished backtesting for {ticker}")
-    return {'stats': stats, 'goodness': goodness}
-    # except Exception as cause:
-    #     print(f"failed to backtest {ticker} cause=f{cause}")
-    #     return None
+        stats = create_backtest_stats(
+            ticker,
+            equity, final, longs, shorts, winner_longs, winner_shorts, loser_longs, loser_shorts, 
+            max_buy_win_val, max_buy_loss_val, max_sell_win_val, max_sell_loss_val,
+            largest_hold_buy_winner_time, largest_hold_buy_loser_time, largest_hold_sell_winner_time, largest_hold_sell_loser_time                
+        )
+        print(f"Finished backtesting for {ticker}")
+        return {'stats': stats, 'goodness': goodness}
+    except Exception as cause:
+        print(f"failed to backtest {ticker} cause=f{cause}")
+        return None
     
 traders = {    
     'no-hedge': simulate_trading_no_hedge,
