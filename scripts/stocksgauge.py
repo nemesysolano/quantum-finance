@@ -10,7 +10,6 @@ from sklearn.model_selection import train_test_split
 from sklearn.metrics import accuracy_score, classification_report
 import pandas as pd
 import numpy as np
-from qf.nn.models.base.gauge.metafeatures import train_gauge_meta_ensemble
 keras = tf.keras
 
 def random_slipage(lower, upper):
@@ -31,7 +30,9 @@ def simulate_trading_no_hedge(y_test, physics_test, initial_cap=10000):
     e_low = physics_test['E_Low'].values
     e_high = physics_test['E_High'].values
     price_values = physics_test['Close'].values
-
+    p_up = physics_test['P↑'].values
+    p_down = physics_test['P↓'].values
+    
     # Convert basis points to a decimal multiplier (e.g., 2bps = 0.0002)
     # This represents the cumulative friction for a round-trip trade
     
@@ -41,7 +42,7 @@ def simulate_trading_no_hedge(y_test, physics_test, initial_cap=10000):
         slippage_cost = random_slipage(5, 10) / 10000
 
         # Dynamic Threshold calculation
-        threshold = np.int(np.sign(o_d[i]) + np.sign(o_dd[i]))
+        threshold = int(np.sign(o_d[i]) + np.sign(o_dd[i]))
         
         # Reference price/ATR at time of signal (t)
         # Outcome is the move from t to t+1
@@ -52,7 +53,7 @@ def simulate_trading_no_hedge(y_test, physics_test, initial_cap=10000):
         lower_distance = current_price - e_low[i]
 
         # 1. LONG SIGNAL
-        if threshold == 2:
+        if threshold == 2 and p_up[i] > 0.025*p_down[i]:
             longs += 1
             tp = min(yesterday_atr,upper_distance)
             sl = -min(0.33 * yesterday_atr, lower_distance)
@@ -72,7 +73,7 @@ def simulate_trading_no_hedge(y_test, physics_test, initial_cap=10000):
                 else: loser_longs += 1
 
         # 2. SHORT SIGNAL
-        elif threshold == -2:
+        elif threshold == -2 and p_down[i] > 0.025*p_up[i]:
             shorts += 1
             tp = -min(yesterday_atr, lower_distance)
             sl = 0.33 * min(yesterday_atr, upper_distance)
@@ -142,26 +143,28 @@ def create_backtest_stats(ticker,equity_curve, cash, long_trades, short_trades, 
 
 def back_test(params):
     (k, ticker, interval) = params        
-    gru_model_file = os.path.join(os.getcwd(), 'models', f'{ticker}-gauge.keras')
-    gru_model = keras.models.load_model(gru_model_file)
-    print(f"Loaded {gru_model_file}")
-    historical_dataset = base.metafeatures.gauge_meta_features(gru_model, k,  mkt.import_market_data(ticker, interval, k))
-    historical_dataset['ATR'] = fracdiff.get_atr(historical_dataset['Close'], k)
+    try:
+        historical_dataset = mkt.import_market_data(ticker, interval, k)
+        historical_dataset['ATR'] = fracdiff.get_atr(historical_dataset['Close'], k)
+        historical_dataset.dropna(inplace=True)
+        y_test = historical_dataset['Close'].pct_change().shift(-1)
+        y_test.dropna(inplace=True)    
+        physics_test = historical_dataset.loc[y_test.index, ['Ö', 'Öd', 'Ödd', 'ATR','E_High', 'E_Low', 'Close', 'P↑', 'P↓']]
 
-    # Prepare for Meta-Training
-    _, _, _, meta_train, meta_test = mkt.create_datasets(historical_dataset)
-    _, X_test, y_test, probs = train_gauge_meta_ensemble(meta_train, meta_test)
-    physics_test = historical_dataset.loc[X_test.index, ['Ö', 'Öd', 'Ödd', 'ATR','E_High', 'E_Low', 'Close']]
-    equity_curve, cash, longs, shorts, winner_longs, loser_longs, winner_shorts, loser_shorts = simulate_trading_no_hedge(y_test, physics_test)
-    stats = create_backtest_stats(ticker, equity_curve, cash, longs, shorts, winner_longs, winner_shorts, loser_longs, loser_shorts)
-    return stats
+        equity_curve, cash, longs, shorts, winner_longs, winner_shorts, loser_longs, loser_shorts = simulate_trading_no_hedge(y_test, physics_test)
+        stats = create_backtest_stats(ticker, equity_curve, cash, longs, shorts, winner_longs, winner_shorts, loser_longs, loser_shorts)
+        return stats
+    except:
+        print(f"ERROR: backtersing {ticker}")
+        return  None
+    
 
 if __name__ == '__main__':
     tickers_file = sys.argv[1]    
     k = 14
     tickers = [(k, ticker, "1d") for ticker in np.loadtxt(tickers_file, dtype=str)]
     with Pool(processes=4) as pool:
-        result = pool.map(back_test, tickers)
+        result = list(map(back_test, tickers))
     
     output_file = os.path.join(os.getcwd(), "test-results", f"report-stocksgauge.csv")
     os.remove(output_file) if os.path.exists(output_file) else None
@@ -170,6 +173,6 @@ if __name__ == '__main__':
            "Ticker,Initial Capital,Final Capital,Total Return (%),Max Drawdown (%),Volatility (per step),Sharpe Ratio,Number of Steps,Peak Equity,Final Drawdown,Long Trades,Short Trades,Winner Longs,Winner Shorts,Loser Longs,Loser Shorts,", 
         file=f)    
         for stats in result:    
-            if result is None:
+            if stats is None:
                 continue            
             print(f"{stats['Ticker']},{stats['Initial Capital']:.2f},{stats['Final Capital']:.2f},{stats['Total Return (%)']:.2f},{stats['Max Drawdown (%)']:.2f},{stats['Volatility (per step)']:.4f},{stats['Sharpe Ratio']:.4f},{stats['Number of Steps']},{stats['Peak Equity']:.2f},{stats['Final Drawdown (%)']:.2f},{stats['Long Trades']},{stats['Short Trades']},{stats['Winner Longs']},{stats['Winner Shorts']},{stats['Loser Longs']},{stats['Loser Shorts']}", file=f)

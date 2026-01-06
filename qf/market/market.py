@@ -1,3 +1,4 @@
+from multiprocessing import Pool
 import time
 import pandas as pd
 import yfinance as yf
@@ -28,14 +29,15 @@ def import_market_data(symbol, interval, lookback_periods = 14):
     module_dir = os.path.dirname(__file__)
     data_dir = os.path.join(module_dir, 'data')
     output_path = os.path.join(data_dir, f"{symbol}.csv")
-
+    ticker = yf.Ticker(symbol)     
+    market_type = "FOREX" if symbol.endswith("=X") else "STOCK"
+    
     if not os.path.exists(data_dir):
         os.makedirs(data_dir)
     
     start_time = time.time()
     if not os.path.exists(output_path):
-        ticker = yf.Ticker(symbol)     
-
+        
         if interval != '1d':
             end_date = datetime.now()
             start_date = end_date - timedelta(days=59)
@@ -58,7 +60,7 @@ def import_market_data(symbol, interval, lookback_periods = 14):
         add_probability_differences(historical_data)
         add_wavelet_differences(historical_data)
         add_quantum_lambda(ticker, historical_data, lookback_periods)
-        add_boundary_energy_levels(historical_data,lookback_periods)
+        add_boundary_energy_levels(historical_data,market_type, lookback_periods)
         add_scrodinger_gauge(historical_data)
         add_scrodinger_gauge_differences(historical_data)
         add_scrodinger_gauge_acceleration(historical_data)
@@ -67,26 +69,31 @@ def import_market_data(symbol, interval, lookback_periods = 14):
 
     return read_csv(output_path)
 
+def import_maket_data_cycle(args):
+    (symbol, interval, lookback_periods) = args
+    module_dir = os.path.dirname(__file__)
+    start_time = time.time()
+    try:
+        print(f"Importing data for {symbol}...")
+        import_market_data(symbol, interval, lookback_periods)
+        print(f"Data for {symbol} imported successfully.")
+    except Exception as e:
+        output_path = os.path.join(module_dir, 'data', f"{symbol}.csv")
+        if os.path.exists(output_path):
+            os.remove(output_path)
+        print(f"Failed to import data for {symbol}: {e}")
+    time_delta = time.time() - start_time
+    print(f"{symbol} Time elapsed: {time_delta} seconds")
+    return time_delta
 
 def import_market_all_data(quantization_level, interval, lookback_periods):    
     module_dir = os.path.dirname(__file__)
     stock_listing_file = os.path.join(module_dir, 'stocks.txt')
-
+    pool = Pool(processes=4)
     with open(stock_listing_file, 'r') as f:
         symbols = [line.strip() for line in f]
     
-    for symbol in symbols:
-        start_time = time.time()
-        try:
-            print(f"Importing data for {symbol}...")
-            import_market_data(symbol, quantization_level, interval, lookback_periods)
-            print(f"Data for {symbol} imported successfully.")
-        except Exception as e:
-            output_path = os.path.join(module_dir, 'data', f"{symbol}.csv")
-            if os.path.exists(output_path):
-                os.remove(output_path)
-            print(f"Failed to import data for {symbol}: {e}")
-        print(f"{symbol} Time elapsed: {time.time() - start_time} seconds")
+    pool.map(import_maket_data_cycle, [(symbol, interval, lookback_periods) for symbol in symbols])       
   
 def read_datasets(symbol):
     module_dir = os.path.dirname(__file__)

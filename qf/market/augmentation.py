@@ -518,11 +518,11 @@ def add_quantum_lambda(ticker, historical_data, lookback_periods):
         lambdas[t] = quantum_lambda(return_p[T:t])# [T:t]
         T += 1
         
-    df['λ'] = lambdas
-    df.dropna(inplace=True)
+    df['λ'] = lambdas   
+    df.dropna(inplace=True)        
     return df
 
-def add_boundary_energy_levels(df, window=14):
+def add_boundary_energy_levels(df, market_type, window):
     """
     Causal 14-day Rolling Energy Levels.
     Prevents the 'Physics' from knowing future price extremes.
@@ -530,12 +530,13 @@ def add_boundary_energy_levels(df, window=14):
     # Use rolling window for local max/min
     df['Rolling_Max'] = df['Close'].rolling(window=window).max()
     df['Rolling_Min'] = df['Close'].rolling(window=window).min()
-    
+
     # Calculate energy levels row-by-row using ONLY previous 14 days
-    df['E_High'] = df.apply(lambda x: maximum_energy_level(x['Rolling_Max'], x['λ']), axis=1)
+    df['E_High'] = df.apply(lambda x: maximum_energy_level(x['Rolling_Max'], x['λ'], market_type), axis=1)
     df['E_Low'] = df.apply(lambda x: minimum_energy_level(x['Rolling_Min'], x['λ']), axis=1)
-    
+
     df.drop(columns=['Rolling_Max', 'Rolling_Min'], inplace=True)
+    df.dropna(inplace=True)
     return df
 
 def add_scrodinger_gauge(historical_data):

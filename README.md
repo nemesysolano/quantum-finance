@@ -443,7 +443,7 @@ Let $\{L(x(τ-k)), \dots, L(x(τ-1))\}$ be a sample sequence of Log-Returns, whi
 
 The constant $λ$ can be approximated with this formula:
 
-$λ \approx \left| \frac{ L^2_0 f(L_0,ν) - L^2_1 f(L_1,ν) }{ L^4_1 f(L_1,ν) - L^4_0 f(L_0,ν) } \right|$, where
+$λ \approx \log( \frac{ \left| L^2_0 f(L_0,ν) - L^2_1 f(L_1,ν) \right| }{ 10^{-9} + \left|L^4_1 f(L_1,ν) - L^4_0 f(L_0,ν)  \right|})$, where
 
 1. $L_0 = -σ$,
 2. $L_1 =  σ$,
