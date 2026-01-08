@@ -166,13 +166,51 @@ $Θ_k(t) = \arctan\left(\frac{b_k(t)}{c_k(t) + \epsilon}\right) \quad \text{for 
 *Note: A small epsilon ($\epsilon$) is recommended in implementation to prevent division by zero if the current price is exactly at a structural level.*
 
 ## Wavelets ##
-Consider the four price-time angles ${θ_1(t-1)}$, ${θ_2(t-1)}$, ${θ_3(t-1)}$ and ${θ_4(t-1)}$ ruling at time ${t-1}$. The **wavelet $W(t)$** function
+Consider the four price-time angles ${θ_1(t)}$, ${θ_2(t)}$, ${θ_3(t)}$ and ${θ_4(t1)}$ ruling at time ${t}$. The **wavelet $W(t)$** function
 is a periodic non-linear function defined as
 
-$W(t) = \mathbf{sgn}(Δc(t-1))⋅S(t-1)⋅\frac {(\sum^4_{i=1} [\cos θ_i(t-1) + \sin θ_i(t-1)])^2} {A}$, where 
+$W(t) = \tanh (β(t)⋅\frac{Δc(t) }{σ(t)+e})⋅\mathbf{sgn} \sum^4_{i=1} (\cos θ_i(t) + \sin θ_i(t))$, where 
 
-$A =  \max_{i=1,...,4} \{(4 (\cos θ_i(t-1) + \sin θ_i(t-1)))^2\}$
+$σ(t) = \frac{A}{32}⋅\mathbf{ATR\%}_k(t)$,
 
+$A(t) =  \max_{i=1,...,4} \{(4 (\cos θ_i(t) + \sin θ_i(t)))^2\}$ and
+
+$β(t)$ is calculated by a process described in the next section.
+
+---
+### Wavelet Gain Control: Dynamic Beta Dynamics ###
+
+To ensure the Wavelet field $W(t)$ maintains structural integrity across varying market regimes, the system implements a **Dynamic Gain Control** heuristic. This prevents signal saturation during high-volatility spikes while preserving responsiveness during low-volatility consolidation.
+
+#### 1. Baseline Sensitivity Estimation
+We estimate a practical baseline sensitivity by calculating the historical **Signal-to-Noise Ratio (SNR)**. This ensures the $\tanh$ argument remains in the "active zone" specific to the asset's price-action personality.
+
+$SNR(t) = \mathbf{median}_{3k} \left( \frac{|\Delta c(t)|}{σ(t) + \epsilon} \right)$
+
+$β_0 = \mathbf{clamp} \left( \frac{1.0}{\mathbf{SNR}(t)}, 0.8, 1.5 \right)$
+
+#### 2. Relative Volatility Scaling
+The market's current "mood" is established by comparing short-term volatility (14-period ATR%) to a long-term baseline (70-period ATR%).
+
+$\mathbf{rel\_vol}(t) = \frac{ATR\%_{k}(t)}{\mathbf{mean}_{2k}(\mathbf{ATR\%}_k(t)}$
+
+#### 3. Final $\beta$ Calculation
+The coefficient $\beta_{final}$ is the product of the asset-specific baseline and the inverse of the relative volatility. This effectively throttles the engine during chaos and "supercharges" it during calm.
+
+$β(t) = \mathbf{clamp} \left( \frac{β_0}{\mathbf{rel\_vol}(t)}, 0.5, 2.5 \right)$
+
+#### 4. Physics Impact ###
+* **High Volatility ($rel\_vol > 1$):** $\beta_{final}$ decreases (approaching $0.5$). This widens the noise gate, requiring a larger price impulse to flip the Wavelet state, filtering out "fake" breakouts.
+* **Low Volatility ($rel\_vol < 1$):** $\beta_{final}$ increases (approaching $2.5$). This narrows the noise gate, allowing the model to capture micro-trends and early-stage momentum.
+
+---
+In order to make backetsting with wavelets realistic, we have to include slippage as our capital grows. This mean that **fill price** ($P_f$) may be different thant **market price** ($P_m$). In order
+to estimate $P_f$, we use the
+
+$P_f = P_m ⋅ (1+\mathbf {sgn}(d))⋅J⋅\sqrt {\frac{|d|}{\hat v}} $, where
+
+$J$ is the fragility factor.
+$d$ is the trade size.
 
 ## Bar Inbalance ##
 

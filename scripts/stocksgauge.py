@@ -15,7 +15,86 @@ keras = tf.keras
 def random_slipage(lower, upper):
     return np.random.uniform(lower, upper)
 
-def simulate_trading_no_hedge(y_test, physics_test, initial_cap=10000):    
+def simulate_trading_wd(y_test, physics_test, initial_cap=10000):    
+    cash = initial_cap
+    equity_curve = [initial_cap]
+    longs, shorts = 0, 0
+    winner_longs, winner_shorts = 0, 0
+    loser_longs, loser_shorts = 0, 0
+    
+    y_actual = y_test.values if isinstance(y_test, pd.Series) else y_test
+    # Extract physics for dynamic thresholding
+    o_d = physics_test['Öd'].values
+    o_dd = physics_test['Ödd'].values
+    atr_values = physics_test['ATR'].values
+    e_low = physics_test['E_Low'].values
+    e_high = physics_test['E_High'].values
+    price_values = physics_test['Close'].values
+    Wd = physics_test['Wd'].values
+    W = physics_test['W'].values
+    
+    # Convert basis points to a decimal multiplier (e.g., 2bps = 0.0002)
+    # This represents the cumulative friction for a round-trip trade
+    
+    # Start from 0, but evaluate outcome at i + 1
+    # We stop at len(probs) - 1 to avoid index out of bounds
+    for i in range(len(y_actual) - 1):
+        slippage_cost = random_slipage(5, 10) / 10000
+
+        # Dynamic Threshold calculation
+        threshold = int(np.sign(o_d[i]) + np.sign(o_dd[i]))
+        
+        # Reference price/ATR at time of signal (t)
+        # Outcome is the move from t to t+1
+        next_bar_return = y_actual[i + 1] 
+        yesterday_atr = atr_values[i]
+        current_price = price_values[i]
+        upper_distance = e_high[i] - current_price
+        lower_distance = current_price - e_low[i]
+
+        # 1. LONG SIGNAL: Field is positive AND energy is increasing
+        if threshold == 2 and W[i] > 0 and Wd[i] > 0:
+            longs += 1
+            tp = min(yesterday_atr,upper_distance)
+            sl = -min(0.33 * yesterday_atr, lower_distance)
+            
+            # Slippage is applied as a deduction from the profit/loss realized
+            if next_bar_return >= tp:
+                cash += ((initial_cap * 0.02) * 3) - (cash * slippage_cost)
+                winner_longs += 1
+            elif next_bar_return <= sl:
+                cash -= ((initial_cap * 0.02) + (cash * slippage_cost))
+                loser_longs += 1
+            else:
+                # Market close exit (pro-rata)
+                realized = next_bar_return / (0.33 * yesterday_atr)
+                cash += ((initial_cap * 0.02) * realized) - (cash * slippage_cost)
+                if next_bar_return > 0: winner_longs += 1
+                else: loser_longs += 1
+
+        # 2. SHORT SIGNAL: Field is negative AND energy is decreasing (pushing down)
+        elif threshold == -2 and W[i] < 0 and Wd[i] > 0:
+            shorts += 1
+            tp = -min(yesterday_atr, lower_distance)
+            sl = 0.33 * min(yesterday_atr, upper_distance)
+            
+            if next_bar_return <= tp:
+                cash += ((initial_cap * 0.02) * 3) - (cash * slippage_cost)
+                winner_shorts += 1
+            elif next_bar_return >= sl:
+                cash -= ((initial_cap * 0.02) + (cash * slippage_cost))
+                loser_shorts += 1
+            else:
+                realized = -next_bar_return / (0.33 * yesterday_atr)
+                cash += ((initial_cap * 0.02) * realized) - (cash * slippage_cost)
+                if next_bar_return < 0: winner_shorts += 1
+                else: loser_shorts += 1
+
+        equity_curve.append(cash)
+
+    return equity_curve, cash, longs, shorts, winner_longs, winner_shorts, loser_longs, loser_shorts
+
+def simulate_trading_pd(y_test, physics_test, initial_cap=10000):    
     cash = initial_cap
     equity_curve = [initial_cap]
     longs, shorts = 0, 0
@@ -149,9 +228,9 @@ def back_test(params):
         historical_dataset.dropna(inplace=True)
         y_test = historical_dataset['Close'].pct_change().shift(-1)
         y_test.dropna(inplace=True)    
-        physics_test = historical_dataset.loc[y_test.index, ['Ö', 'Öd', 'Ödd', 'ATR','E_High', 'E_Low', 'Close', 'P↑', 'P↓']]
+        physics_test = historical_dataset.loc[y_test.index, ['Ö', 'Öd', 'Ödd', 'ATR','E_High', 'E_Low', 'Close', 'P↑', 'P↓', 'W', 'Wd']]
 
-        equity_curve, cash, longs, shorts, winner_longs, winner_shorts, loser_longs, loser_shorts = simulate_trading_no_hedge(y_test, physics_test)
+        equity_curve, cash, longs, shorts, winner_longs, winner_shorts, loser_longs, loser_shorts = simulate_trading_wd(y_test, physics_test)
         stats = create_backtest_stats(ticker, equity_curve, cash, longs, shorts, winner_longs, winner_shorts, loser_longs, loser_shorts)
         return stats
     except:

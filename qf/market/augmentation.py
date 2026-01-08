@@ -293,66 +293,65 @@ def add_price_time_angles(historical_data, epsilon=1e-9):
     df.dropna(inplace=True)
     return df
 
-import numpy as np
-import pandas as pd
-
-def add_wavelets(historical_data):
+def add_wavelets(historical_data, k):
     """
-    Implements the Wavelet function W(t) using the sgn(Δc) adjustment.
-    
-    Formula: 
-    W(t) = sgn(Δc(t-1)) * S(t-1) * (sum(cos(θi) + sin(θi)))^2 / A
-    Where:
-        A = max_{i=1...4} {(4 * (cos(θi) + sin(θi)))^2}
-        θi are the price-time angles at t-1.
-        
-    Args:
-        historical_data (pd.DataFrame): Must contain 'Close', 'S', and 'ϴ1'...'ϴ4'.
-        
-    Returns:
-        pd.DataFrame: Dataframe with 'W' column added.
+    Implements Wavelet Gain Control with Dynamic Beta Dynamics.
+    Lookbacks: SNR (3k), rel_vol baseline (2k), ATR/Current Vol (k).
     """
     df = historical_data
-    n = len(df)
-    w_values = np.zeros(n)
+    epsilon = 1e-9
     
-    # 1. Calculate Δc(t): Bounded Percentage Difference of Close
-    # We only need the sign of this difference for the wavelet formula
-    c = df['Close'].values
-    c_prev = df['Close'].shift(1).values
-    delta_c = (c - c_prev) / (np.abs(c) + np.abs(c_prev) + 1e-9)
-    sgn_delta_c = np.sign(delta_c)
+    # --- 1. Basic Volatility & Momentum (Period: k) ---
+    high, low, close = df['High'], df['Low'], df['Close']
+    prev_close = close.shift(1)
     
-    # 2. Iterate to calculate W(t) using t-1 values
-    for t in range(1, n):
-        # Retrieve the state of the system at the close of the previous bar (t-1)
-        sgn_dc_prev = sgn_delta_c[t-1]
-        s_prev = df['S'].iloc[t-1]
-        
-        # Collect angles θ1...θ4 at t-1
-        angles = [df[f'ϴ{i}'].iloc[t-1] for i in range(1, 5)]
-        
-        # Calculate periodic components: (cos(θ) + sin(θ))
-        trig_terms = [np.cos(theta) + np.sin(theta) for theta in angles]
-        
-        # 3. Calculate the squared sum (Numerator)
-        # This represents the total constructive/destructive geometric interference
-        numerator = np.square(sum(trig_terms))
-        
-        # 4. Calculate normalization factor A
-        # A = max over i of (4 * (cos(θi) + sin(θi)))^2
-        # This ensures the geometric ratio is bounded by 1.0
-        a_candidates = [np.square(4 * val) for val in trig_terms]
-        A = max(a_candidates)
-        
-        # 5. Final Wavelet Calculation W(t)
-        if A > 0:
-            w_values[t] = sgn_dc_prev * s_prev * (numerator / A)
-        else:
-            w_values[t] = 0.0
-            
-    df['W'] = w_values
-    df.dropna(inplace=True)
+    # Calculate ATR% (used as the basis for sigma)
+    tr = pd.concat([high - low, (high - prev_close).abs(), (low - prev_close).abs()], axis=1).max(axis=1)
+    atr = tr.rolling(window=k).mean()
+    atr_pct = (atr / close).replace(0, np.nan)
+    
+    # Delta C: Bounded Percentage Difference (Momentum)
+    denom = close.abs() + prev_close.abs()
+    delta_c = (close - prev_close) / denom.replace(0, epsilon)
+
+    # --- 2. Interference & Amplitude (Physics Engine) ---
+    # Retrieve Price-Time Angles from dataframe
+    t1, t2, t3, t4 = df['ϴ1'], df['ϴ2'], df['ϴ3'], df['ϴ4']
+    
+    # sgn component: Directional pressure from interference pattern
+    interference = (np.cos(t1) + np.sin(t1)) + (np.cos(t2) + np.sin(t2)) + \
+                   (np.cos(t3) + np.sin(t3)) + (np.cos(t4) + np.sin(t4))
+    direction_sign = np.sign(interference)
+    
+    # Sigma calculation: Amplitude (A) / 32 * ATR%
+    e_terms = [(4 * (np.cos(tx) + np.sin(tx)))**2 for tx in [t1, t2, t3, t4]]
+    A = np.maximum.reduce(e_terms)
+    sigma = (A / 32.0) * atr_pct
+
+    # --- 3. Baseline Sensitivity Beta_0 (Period: 3k) ---
+    # SNR = median of (|delta_c| / sigma) over 3k periods
+    raw_snr = (delta_c.abs() / (sigma + epsilon))
+    snr_t = raw_snr.rolling(window=3*k).median()
+    
+    # beta_0: Clamped to [0.8, 1.5]
+    beta_0 = (1.0 / (snr_t + epsilon)).clip(0.8, 1.5)
+
+    # --- 4. Relative Volatility Scaling (Period: 2k) ---
+    # Long-term baseline mean over 2k periods
+    baseline_vol = atr_pct.rolling(window=2*k).mean()
+    rel_vol = (atr_pct / (baseline_vol + epsilon)).fillna(1.0)
+    
+    # --- 5. Final Beta & Wavelet State (Final β) ---
+    # Final beta: Clamped to [0.5, 2.5]
+    beta_final = (beta_0 / rel_vol).clip(0.5, 2.5)
+
+    # W(t) calculation
+    argument = beta_final * (delta_c / (sigma + epsilon))
+    df['W'] = np.tanh(argument) * direction_sign
+    
+    # Wd calculation (Serial Difference)
+    df['Wd'] = (df['W'] - df['W'].shift(1)) / 2.0
+    
     return df
 
 def add_bar_inbalance(historical_data):

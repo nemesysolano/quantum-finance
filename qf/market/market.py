@@ -55,7 +55,7 @@ def import_market_data(symbol, interval, lookback_periods = 14):
         add_directional_probabilities(historical_data)
         add_price_volume_oscillator(historical_data)
         add_price_time_angles(historical_data)
-        add_wavelets(historical_data)
+        add_wavelets(historical_data, lookback_periods)
         add_price_volume_differences(historical_data)
         add_probability_differences(historical_data)
         add_wavelet_differences(historical_data)
