@@ -53,7 +53,7 @@ def simulate_trading_wd(y_test, physics_test, initial_cap=10000):
         lower_distance = current_price - e_low[i]
 
         # 1. LONG SIGNAL: Field is positive AND energy is increasing
-        if threshold == 2 and W[i] > 0 and Wd[i] > 0:
+        if threshold == 2 and W[i] > 0:
             longs += 1
             tp = min(yesterday_atr,upper_distance)
             sl = -min(0.33 * yesterday_atr, lower_distance)
@@ -73,7 +73,7 @@ def simulate_trading_wd(y_test, physics_test, initial_cap=10000):
                 else: loser_longs += 1
 
         # 2. SHORT SIGNAL: Field is negative AND energy is decreasing (pushing down)
-        elif threshold == -2 and W[i] < 0 and Wd[i] > 0:
+        elif threshold == -2 and W[i] < 0:
             shorts += 1
             tp = -min(yesterday_atr, lower_distance)
             sl = 0.33 * min(yesterday_atr, upper_distance)
