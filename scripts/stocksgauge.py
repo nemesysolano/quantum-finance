@@ -4,80 +4,71 @@ import qf.market as mkt
 import os
 import tensorflow as tf
 from qf.nn import fracdiff
-import qf.nn.models.base as base
-import xgboost as xgb
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import accuracy_score, classification_report
-import pandas as pd
 import numpy as np
 keras = tf.keras
 
 def dynamic_slippage(atr_pct, base_median_bps=0.01, base_sigma=0.5):
     """
     Generates a log-normal slippage distribution scaled by ATR%.
-    Mimics market microstructure: tight spreads usually, but sudden 'fat-tail' spikes.
     """
-    # Generate log-normal noise (real-world execution distribution)
     noise = np.random.lognormal(mean=np.log(base_median_bps), sigma=base_sigma)
-    
-    # Apply volatility penalty: scaling the impact based on ATR/Price ratio
     turbulence_factor = np.clip(atr_pct / 0.008, 1.0, 8.0) 
-    
     return (noise * turbulence_factor) / 10000
 
-def discretize_take_profit(tp, current_price):
-    pass
+def apply_integer_nudge(price, dist, is_tp, is_long):
+    """
+    Adjusts the target distance to avoid clustering exactly on integer levels.
+    """
+    target_price = price + dist if (is_long and is_tp) or (not is_long and not is_tp) else price - dist
+    nudge = 0.0001 # Small offset to push past the integer
+    
+    # If the target is very close to an integer, nudge it
+    if abs(target_price - round(target_price)) < 0.001:
+        if (is_long and is_tp) or (not is_long and not is_tp):
+            dist += nudge # Push TP further or SL wider
+        else:
+            dist -= nudge # Pull SL tighter or TP closer
+    return dist
+
 def simulate_trading_wd(y_test, physics_test, initial_cap=10000):    
     cash = initial_cap
     equity_curve = [initial_cap]
-    longs, shorts = 0, 0
-    winner_longs, winner_shorts = 0, 0
-    loser_longs, loser_shorts = 0, 0
+    longs, shorts, winner_longs, winner_shorts, loser_longs, loser_shorts = 0, 0, 0, 0, 0, 0
     
-    y_actual = y_test.values if isinstance(y_test, pd.Series) else y_test
-    o_d = physics_test['Öd'].values
-    o_dd = physics_test['Ödd'].values
+    y_actual = y_test.values
+    o_d, o_dd = physics_test['Öd'].values, physics_test['Ödd'].values
     atr_values = physics_test['ATR'].values
-    e_low = physics_test['E_Low'].values
-    e_high = physics_test['E_High'].values
+    e_low, e_high = physics_test['E_Low'].values, physics_test['E_High'].values
     price_values = physics_test['Close'].values
     W = physics_test['W'].values 
     
     for i in range(len(y_actual) - 1):
         if cash <= 0:
-            equity_curve.append(0)
-            continue
+            equity_curve.append(0); continue
 
-        rel_performance = (cash - initial_cap) / initial_cap
-        base_risk_rate = np.clip(0.02 + (rel_performance * 0.1), 0.01, 0.05)
-        w_multiplier = np.clip(abs(W[i]), 1.0, 3.0) 
-        risk_amount = initial_cap * base_risk_rate * w_multiplier
+        rel_perf = (cash - initial_cap) / initial_cap
+        risk_rate = np.clip(0.02 + (rel_perf * 0.1), 0.01, 0.05)
+        risk_amount = initial_cap * risk_rate * np.clip(abs(W[i]), 1.0, 3.0)
 
         threshold = int(np.sign(o_d[i]) + np.sign(o_dd[i]))
         next_bar_return = y_actual[i + 1]
-        yesterday_atr = atr_values[i]
-        current_price = price_values[i]
-        
-        atr_pct = yesterday_atr / current_price
-        slippage_cost = dynamic_slippage(atr_pct) 
+        atr, price = atr_values[i], price_values[i]
+        friction = cash * dynamic_slippage(atr/price) * 2
 
         # LONG SIGNAL
         if threshold == 2 and W[i] > 0:
             longs += 1
-            # Distances as positive values
-            tp_dist = min(yesterday_atr, e_high[i] - current_price)
-            sl_dist = min(0.33 * yesterday_atr, current_price - e_low[i])
-            
-            friction = cash * slippage_cost * 2
+            tp_dist = apply_integer_nudge(price, min(atr, e_high[i] - price), True, True)
+            sl_dist = apply_integer_nudge(price, min(0.33 * atr, price - e_low[i]), False, True)
             
             if next_bar_return >= tp_dist:
-                cash += (risk_amount * 3) - friction
-                winner_longs += 1
-            elif next_bar_return <= -sl_dist: # Comparing to negative distance
-                cash -= (risk_amount + friction)
-                loser_longs += 1
+                cash += (risk_amount * 3) - friction; winner_longs += 1
+            elif next_bar_return <= -sl_dist:
+                cash -= (risk_amount + friction); loser_longs += 1
             else:
-                realized = next_bar_return / (0.33 * yesterday_atr)
+                realized = next_bar_return / (0.33 * atr)
                 cash += (risk_amount * realized) - friction
                 if next_bar_return > 0: winner_longs += 1
                 else: loser_longs += 1
@@ -85,122 +76,80 @@ def simulate_trading_wd(y_test, physics_test, initial_cap=10000):
         # SHORT SIGNAL
         elif threshold == -2 and W[i] < 0:
             shorts += 1
-            # Distances as positive values
-            tp_dist = min(yesterday_atr, current_price - e_low[i])
-            sl_dist = 0.33 * min(yesterday_atr, e_high[i] - current_price)
+            tp_dist = apply_integer_nudge(price, min(atr, price - e_low[i]), True, False)
+            sl_dist = apply_integer_nudge(price, 0.33 * min(atr, e_high[i] - price), False, False)
             
-            friction = cash * slippage_cost * 2
-            
-            if next_bar_return <= -tp_dist: # Win if move is more negative than TP distance
-                cash += (risk_amount * 3) - friction
-                winner_shorts += 1
-            elif next_bar_return >= sl_dist: # Loss if move is more positive than SL distance
-                cash -= (risk_amount + friction)
-                loser_shorts += 1
+            if next_bar_return <= -tp_dist:
+                cash += (risk_amount * 3) - friction; winner_shorts += 1
+            elif next_bar_return >= sl_dist:
+                cash -= (risk_amount + friction); loser_shorts += 1
             else:
-                realized = -next_bar_return / (0.33 * yesterday_atr)
+                realized = -next_bar_return / (0.33 * atr)
                 cash += (risk_amount * realized) - friction
                 if next_bar_return < 0: winner_shorts += 1
                 else: loser_shorts += 1
 
         equity_curve.append(cash)
-
     return equity_curve, cash, longs, shorts, winner_longs, winner_shorts, loser_longs, loser_shorts
 
 def simulate_trading_pd(y_test, physics_test, initial_cap=10000, k_window=14):    
     cash = initial_cap
-    equity_curve = [initial_cap]
-    trade_returns = [] 
+    equity_curve, trade_returns = [initial_cap], []
+    longs, shorts, winner_longs, winner_shorts, loser_longs, loser_shorts = 0, 0, 0, 0, 0, 0
     
-    longs, shorts = 0, 0
-    winner_longs, winner_shorts = 0, 0
-    loser_longs, loser_shorts = 0, 0
-    
-    y_actual = y_test.values if isinstance(y_test, pd.Series) else y_test
-    o_d = physics_test['Öd'].values
-    o_dd = physics_test['Ödd'].values
-    atr_values = physics_test['ATR'].values
-    e_low = physics_test['E_Low'].values
-    e_high = physics_test['E_High'].values
-    price_values = physics_test['Close'].values
-    p_up = physics_test['P↑'].values
-    p_down = physics_test['P↓'].values
+    y_actual = y_test.values
+    o_d, o_dd = physics_test['Öd'].values, physics_test['Ödd'].values
+    atr_values, price_values = physics_test['ATR'].values, physics_test['Close'].values
+    e_low, e_high = physics_test['E_Low'].values, physics_test['E_High'].values
+    p_up, p_down = physics_test['P↑'].values, physics_test['P↓'].values
     
     for i in range(len(y_actual) - 1):
         if cash <= 0:
-            equity_curve.append(0)
-            continue
+            equity_curve.append(0); continue
 
-        k_factor = 0
-        if len(trade_returns) >= k_window:
-            avg_recent_return = np.mean(trade_returns[-k_window:])
-            k_factor = np.clip(avg_recent_return * 0.5, -0.01, 0.02)
-
-        rel_performance = (cash - initial_cap) / initial_cap
-        base_risk = 0.02 + (rel_performance * 0.05)
-        risk_rate = np.clip(base_risk + k_factor, 0.01, 0.05)
+        k_factor = np.clip(np.mean(trade_returns[-k_window:]) * 0.5, -0.01, 0.02) if len(trade_returns) >= k_window else 0
+        risk_rate = np.clip(0.02 + ((cash - initial_cap)/initial_cap * 0.05) + k_factor, 0.01, 0.05)
         risk_amount = initial_cap * risk_rate
 
-        current_price = price_values[i]
-        yesterday_atr = atr_values[i]
-        atr_pct = yesterday_atr / current_price
-        slippage_cost = dynamic_slippage(atr_pct)
-
+        atr, price = atr_values[i], price_values[i]
         threshold = int(np.sign(o_d[i]) + np.sign(o_dd[i]))
-        next_bar_return = y_actual[i + 1] 
+        next_bar_return = y_actual[i + 1]
+        friction = cash * dynamic_slippage(atr/price) * 2
 
-        # --- LONG EXECUTION ---
+        # LONG EXECUTION
         if threshold == 2 and p_up[i] > p_down[i]:
             longs += 1
-            tp_dist = min(yesterday_atr, e_high[i] - current_price)
-            sl_dist = min(0.33 * yesterday_atr, current_price - e_low[i])
-            
-            friction = cash * slippage_cost * 2
-            net_profit = 0
+            tp_dist = apply_integer_nudge(price, min(atr, e_high[i] - price), True, True)
+            sl_dist = apply_integer_nudge(price, min(0.33 * atr, price - e_low[i]), False, True)
             
             if next_bar_return >= tp_dist:
-                net_profit = (risk_amount * 3) - friction
-                winner_longs += 1
+                net = (risk_amount * 3) - friction; winner_longs += 1
             elif next_bar_return <= -sl_dist:
-                net_profit = -(risk_amount + friction)
-                loser_longs += 1
+                net = -(risk_amount + friction); loser_longs += 1
             else:
-                realized_ratio = next_bar_return / (0.33 * yesterday_atr)
-                net_profit = (risk_amount * realized_ratio) - friction
+                net = (risk_amount * (next_bar_return / (0.33 * atr))) - friction
                 if next_bar_return > 0: winner_longs += 1
                 else: loser_longs += 1
-            
-            cash += net_profit
-            trade_returns.append(net_profit / risk_amount) 
+            cash += net; trade_returns.append(net / risk_amount)
 
-        # --- SHORT EXECUTION ---
+        # SHORT EXECUTION
         elif threshold == -2 and p_down[i] > p_up[i]:
             shorts += 1
-            tp_dist = min(yesterday_atr, current_price - e_low[i])
-            sl_dist = 0.33 * min(yesterday_atr, e_high[i] - current_price)
+            tp_dist = apply_integer_nudge(price, min(atr, price - e_low[i]), True, False)
+            sl_dist = apply_integer_nudge(price, 0.33 * min(atr, e_high[i] - price), False, False)
             
-            friction = cash * slippage_cost * 2
-            net_profit = 0
-
             if next_bar_return <= -tp_dist:
-                net_profit = (risk_amount * 3) - friction
-                winner_shorts += 1
+                net = (risk_amount * 3) - friction; winner_shorts += 1
             elif next_bar_return >= sl_dist:
-                net_profit = -(risk_amount + friction)
-                loser_shorts += 1
+                net = -(risk_amount + friction); loser_shorts += 1
             else:
-                realized_ratio = -next_bar_return / (0.33 * yesterday_atr)
-                net_profit = (risk_amount * realized_ratio) - friction
+                net = (risk_amount * (-next_bar_return / (0.33 * atr))) - friction
                 if next_bar_return < 0: winner_shorts += 1
                 else: loser_shorts += 1
-            
-            cash += net_profit
-            trade_returns.append(net_profit / risk_amount)
+            cash += net; trade_returns.append(net / risk_amount)
 
         equity_curve.append(cash)
-
-    return (equity_curve, cash, longs, shorts, winner_longs, winner_shorts, loser_longs, loser_shorts)
-
+    return equity_curve, cash, longs, shorts, winner_longs, winner_shorts, loser_longs, loser_shorts
     
 def create_backtest_stats(ticker,equity_curve, cash, long_trades, short_trades, winner_longs, winner_shorts, loser_longs, loser_shorts):
     # Ensure 1D array even if input is a list of arrays or 2D matrix
