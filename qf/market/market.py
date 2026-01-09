@@ -7,7 +7,7 @@ import re
 from datetime import datetime, timedelta
 
 from qf import context
-from qf.market.augmentation import add_bar_inbalance, add_boundary_energy_levels, add_breaking_gap, add_directional_probabilities, add_price_time_angles, add_price_volume_differences, add_price_volume_oscillator, add_probability_differences, add_quantum_lambda, add_scrodinger_gauge, add_scrodinger_gauge_acceleration, add_scrodinger_gauge_differences, add_swing_ratio, add_wavelet_differences, add_wavelets
+from qf.market.augmentation import add_bar_inbalance, add_boundary_energy_levels, add_breaking_gap, add_directional_probabilities, add_price_time_angles, add_price_volume_differences, add_price_volume_oscillator, add_probability_differences, add_quantum_lambda, add_scrodinger_gauge, add_scrodinger_gauge_acceleration, add_scrodinger_gauge_differences, add_swing_ratio, add_wavelets
 base_meta_border = 0.80
 
 def read_csv(path):
@@ -58,7 +58,6 @@ def import_market_data(symbol, interval, lookback_periods = 14):
         add_wavelets(historical_data, lookback_periods)
         add_price_volume_differences(historical_data)
         add_probability_differences(historical_data)
-        add_wavelet_differences(historical_data)
         add_quantum_lambda(ticker, historical_data, lookback_periods)
         add_boundary_energy_levels(historical_data,market_type, lookback_periods)
         add_scrodinger_gauge(historical_data)

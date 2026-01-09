@@ -66,7 +66,7 @@ def add_breaking_gap(historical_data, Q=0.0001):
     df.dropna(inplace=True)
     return df
 
-def add_swing_ratio(historical_data):
+def add_swing_ratio(historical_data): # Fixed Critical Leakage, Jan 8 2026
     """
     Calculates the swing ratio S(t) based on the breaking gap and local range.
     
@@ -91,18 +91,16 @@ def add_swing_ratio(historical_data):
         # 1. Calculate Local Range R(t) over the last 4 bars (0, 1, 2, 3)
         # Using .iloc[t-3:t+1] to get the slice of 4 elements ending at t
         local_highs = df['High'].iloc[t-3:t+1]
-        local_lows = df['Low'].iloc[t-3:t+1]
-        
+        local_lows = df['Low'].iloc[t-3:t+1]        
         rt = local_highs.max() - local_lows.min()
         
         # 2. Calculate Absolute Reference A(t)
         # G(t) magnitude is stored in column 'G'
-        gt_abs = abs(df['G'].iloc[t])
-        at = max(gt_abs, rt)
+        at = max(abs(df['G'].iloc[t]), rt)
         
         # 3. Calculate Swing Ratio S(t)
         if at > 0:
-            s_values[t] = gt_abs / at
+            s_values[t] = abs(df['G'].iloc[t]) / at
         else:
             s_values[t] = 0.0
             
@@ -226,13 +224,7 @@ def add_price_volume_oscillator(historical_data):
 def add_price_time_angles(historical_data, epsilon=1e-9):
     """
     Calculates the four Price-Time Angles (Θ1...Θ4) based on structural geometry.
-    
-    Args:
-        historical_data (pd.DataFrame): Dataframe containing 'High' and 'Low'.
-        epsilon (float): Small value to prevent division by zero.
-        
-    Returns:
-        pd.DataFrame: Dataframe with 'ϴ1', 'ϴ2', 'ϴ3', 'ϴ4' columns added.
+    REVISED: Uses t-1 values as reference to ensure zero lookahead bias.
     """
     df = historical_data
     n = len(df)
@@ -240,49 +232,51 @@ def add_price_time_angles(historical_data, epsilon=1e-9):
     # Initialize result arrays
     theta = {f'ϴ{k}': np.zeros(n) for k in range(1, 5)}
     
-    # Iterate through the data to find structural pivots
-    # We start from index 1 because we look backward (t-j)
-    for t in range(1, n):
-        h_t = df['High'].iloc[t]
-        l_t = df['Low'].iloc[t]
+    # Start from index 2 because we need at least one lookback bar for reference
+    for t in range(2, n):
+        # REFERENCE: We use values from t-1 to define the "current" state
+        # This ensures the angle is known at the OPEN of bar t.
+        h_ref = df['High'].iloc[t-1]
+        l_ref = df['Low'].iloc[t-1]
         
-        # 1. Find Closest Extremes and their indices (i)
-        # Closest Higher High (h_up): h(t-j) > h(t)
-        i_h_up = next((j for j in range(1, t + 1) if df['High'].iloc[t-j] > h_t), 1)
-        h_up = df['High'].iloc[t - i_h_up]
-        
-        # Closest Lower High (h_down): h(t-j) < h(t)
-        i_h_down = next((j for j in range(1, t + 1) if df['High'].iloc[t-j] < h_t), 1)
-        h_down = df['High'].iloc[t - i_h_down]
-        
-        # Closest Higher Low (l_up): l(t-j) > l(t)
-        i_l_up = next((j for j in range(1, t + 1) if df['Low'].iloc[t-j] > l_t), 1)
-        l_up = df['Low'].iloc[t - i_l_up]
-        
-        # Closest Lower Low (l_down): l(t-j) < l(t)
-        i_l_down = next((j for j in range(1, t + 1) if df['Low'].iloc[t-j] < l_t), 1)
-        l_down = df['Low'].iloc[t - i_l_down]
+        # 1. Find Closest Extremes relative to the reference bar (t-1)
+        # We search from j=2 (which is t-2) backward to the start
+        try:
+            # Closest Higher High relative to h_ref
+            i_h_up = next((j for j in range(2, t + 1) if df['High'].iloc[t-j] > h_ref), 2)
+            h_up = df['High'].iloc[t - i_h_up]
+            
+            # Closest Lower High relative to h_ref
+            i_h_down = next((j for j in range(2, t + 1) if df['High'].iloc[t-j] < h_ref), 2)
+            h_down = df['High'].iloc[t - i_h_down]
+            
+            # Closest Higher Low relative to l_ref
+            i_l_up = next((j for j in range(2, t + 1) if df['Low'].iloc[t-j] > l_ref), 2)
+            l_up = df['Low'].iloc[t - i_l_up]
+            
+            # Closest Lower Low relative to l_ref
+            i_l_down = next((j for j in range(2, t + 1) if df['Low'].iloc[t-j] < l_ref), 2)
+            l_down = df['Low'].iloc[t - i_l_down]
+        except StopIteration:
+            # Fallback if no prior extremes are found
+            continue
 
-        # 2. Normalization Factors
-        # Time Lookback Base B(t)
-        bt_factor = max(i_h_up, i_h_down, i_l_up, i_l_down)
-        
-        # Price Range Base C(t)
-        ct_factor = max(h_up - h_t, h_t - h_down, l_up - l_t, l_t - l_down)
+        # 2. Normalization Factors (using distances relative to t-1)
+        bt_factor = max(i_h_up-1, i_h_down-1, i_l_up-1, i_l_down-1)
+        ct_factor = max(h_up - h_ref, h_ref - h_down, l_up - l_ref, l_ref - l_down)
         
         # 3. Normalized Vectors
-        # Time vector b(t)
-        b = [i_h_up/bt_factor, i_h_down/bt_factor, i_l_up/bt_factor, i_l_down/bt_factor]
+        # Adjusted indices to be relative to the reference point (t-1)
+        b = [(i_h_up-1)/bt_factor, (i_h_down-1)/bt_factor, (i_l_up-1)/bt_factor, (i_l_down-1)/bt_factor]
         
-        # Price vector c(t)
         c = [
-            (h_up - h_t) / (ct_factor + epsilon),
-            (h_t - h_down) / (ct_factor + epsilon),
-            (l_up - l_t) / (ct_factor + epsilon),
-            (l_t - l_down) / (ct_factor + epsilon)
+            (h_up - h_ref) / (ct_factor + epsilon),
+            (h_ref - h_down) / (ct_factor + epsilon),
+            (l_up - l_ref) / (ct_factor + epsilon),
+            (l_ref - l_down) / (ct_factor + epsilon)
         ]
         
-        # 4. Calculate Theta Angles: arctan(b_k / (c_k + epsilon))
+        # 4. Calculate Theta Angles
         for k in range(4):
             theta[f'ϴ{k+1}'][t] = np.arctan(b[k] / (c[k] + epsilon))
             
@@ -295,61 +289,67 @@ def add_price_time_angles(historical_data, epsilon=1e-9):
 
 def add_wavelets(historical_data, k):
     """
-    Implements Wavelet Gain Control with Dynamic Beta Dynamics.
-    Lookbacks: SNR (3k), rel_vol baseline (2k), ATR/Current Vol (k).
+    REVISED: Implements strictly causal Wavelet Gain Control.
+    Uses t-1 data for all volatility and momentum inputs to prevent lookahead bias.
     """
     df = historical_data
     epsilon = 1e-9
     
-    # --- 1. Basic Volatility & Momentum (Period: k) ---
-    high, low, close = df['High'], df['Low'], df['Close']
-    prev_close = close.shift(1)
+    # --- 1. Strictly Lagging Volatility & Momentum ---
+    # We use .shift(1) on all raw inputs to ensure we only know 
+    # what happened UP TO the previous close.
+    high_lag = df['High'].shift(1)
+    low_lag = df['Low'].shift(1)
+    close_lag = df['Close'].shift(1)
+    prev_close_lag = df['Close'].shift(2)
     
-    # Calculate ATR% (used as the basis for sigma)
-    tr = pd.concat([high - low, (high - prev_close).abs(), (low - prev_close).abs()], axis=1).max(axis=1)
-    atr = tr.rolling(window=k).mean()
-    atr_pct = (atr / close).replace(0, np.nan)
+    # Calculate ATR% based on lagging data
+    tr_lag = pd.concat([
+        high_lag - low_lag, 
+        (high_lag - prev_close_lag).abs(), 
+        (low_lag - prev_close_lag).abs()
+    ], axis=1).max(axis=1)
     
-    # Delta C: Bounded Percentage Difference (Momentum)
-    denom = close.abs() + prev_close.abs()
-    delta_c = (close - prev_close) / denom.replace(0, epsilon)
+    atr_lag = tr_lag.rolling(window=k).mean()
+    # ATR% known at the start of bar t
+    atr_pct_lag = (atr_lag / close_lag).replace(0, np.nan)
+    
+    # Delta C: Bounded momentum of the PREVIOUS bar
+    denom_lag = close_lag.abs() + prev_close_lag.abs()
+    delta_c_lag = (close_lag - prev_close_lag) / denom_lag.replace(0, epsilon)
 
     # --- 2. Interference & Amplitude (Physics Engine) ---
-    # Retrieve Price-Time Angles from dataframe
+    # Theta angles are already shifted to t-1 in add_price_time_angles
     t1, t2, t3, t4 = df['ϴ1'], df['ϴ2'], df['ϴ3'], df['ϴ4']
     
-    # sgn component: Directional pressure from interference pattern
     interference = (np.cos(t1) + np.sin(t1)) + (np.cos(t2) + np.sin(t2)) + \
                    (np.cos(t3) + np.sin(t3)) + (np.cos(t4) + np.sin(t4))
     direction_sign = np.sign(interference)
     
-    # Sigma calculation: Amplitude (A) / 32 * ATR%
+    # Sigma calculation: uses the ATR% known at the start of the bar
     e_terms = [(4 * (np.cos(tx) + np.sin(tx)))**2 for tx in [t1, t2, t3, t4]]
     A = np.maximum.reduce(e_terms)
-    sigma = (A / 32.0) * atr_pct
+    sigma_lag = (A / 32.0) * atr_pct_lag
 
     # --- 3. Baseline Sensitivity Beta_0 (Period: 3k) ---
-    # SNR = median of (|delta_c| / sigma) over 3k periods
-    raw_snr = (delta_c.abs() / (sigma + epsilon))
-    snr_t = raw_snr.rolling(window=3*k).median()
+    # SNR calculation now uses the lagging momentum and lagging sigma
+    raw_snr_lag = (delta_c_lag.abs() / (sigma_lag + epsilon))
+    snr_t_lag = raw_snr_lag.rolling(window=3*k).median()
     
-    # beta_0: Clamped to [0.8, 1.5]
-    beta_0 = (1.0 / (snr_t + epsilon)).clip(0.8, 1.5)
+    beta_0 = (1.0 / (snr_t_lag + epsilon)).clip(0.8, 1.5)
 
     # --- 4. Relative Volatility Scaling (Period: 2k) ---
-    # Long-term baseline mean over 2k periods
-    baseline_vol = atr_pct.rolling(window=2*k).mean()
-    rel_vol = (atr_pct / (baseline_vol + epsilon)).fillna(1.0)
+    baseline_vol_lag = atr_pct_lag.rolling(window=2*k).mean()
+    rel_vol_lag = (atr_pct_lag / (baseline_vol_lag + epsilon)).fillna(1.0)
     
-    # --- 5. Final Beta & Wavelet State (Final β) ---
-    # Final beta: Clamped to [0.5, 2.5]
-    beta_final = (beta_0 / rel_vol).clip(0.5, 2.5)
+    # --- 5. Final Beta & Wavelet State ---
+    beta_final = (beta_0 / rel_vol_lag).clip(0.5, 2.5)
 
-    # W(t) calculation
-    argument = beta_final * (delta_c / (sigma + epsilon))
+    # W(t) calculation is now purely a function of T-1 and T-2 data
+    argument = beta_final * (delta_c_lag / (sigma_lag + epsilon))
     df['W'] = np.tanh(argument) * direction_sign
     
-    # Wd calculation (Serial Difference)
+    # Wd calculation (Serial Difference of the causal signal)
     df['Wd'] = (df['W'] - df['W'].shift(1)) / 2.0
     
     return df
@@ -466,37 +466,6 @@ def add_price_volume_differences(historical_data):
     
     return df
 
-def add_wavelet_differences(historical_data):
-    """
-    Calculates the Wavelet Difference (Wd).
-    
-    Formula: Wd(t) = Δ(W(t)) = Bounded percentage difference of W at k=1.
-    
-    Args:
-        historical_data (pd.DataFrame): Dataframe containing the 'W' column.
-        
-    Returns:
-        pd.DataFrame: Dataframe with added 'Wd' column.
-    """
-    df = historical_data
-    
-    # Extract current and previous values of the Wavelet W
-    w = df['W'].values
-    w_prev = df['W'].shift(1).values
-    
-    # Calculate Bounded Percentage Difference: Δ%(a, b) = (b - a) / (|a| + |b|)
-    # This represents the Serial Difference Δ(W(t), 1)
-    # Small epsilon added to avoid division by zero
-    numerator = w - w_prev
-    denominator = np.abs(w) + np.abs(w_prev) + 1e-9
-    
-    df['Wd'] = numerator / denominator
-    
-    # Fill the initial NaN resulting from the shift
-    df.dropna(inplace=True)
-    
-    return df
-
 def add_quantum_lambda(ticker, historical_data, lookback_periods):
     """
     Calculates the quantum lambda (λ) using an fixed window to prevent data leakage.
@@ -521,18 +490,19 @@ def add_quantum_lambda(ticker, historical_data, lookback_periods):
     df.dropna(inplace=True)        
     return df
 
-def add_boundary_energy_levels(df, market_type, window):
+def add_boundary_energy_levels(df, market_type, window): # Fixed Critical Leakage, Jan 8 2026
     """
-    Causal 14-day Rolling Energy Levels.
-    Prevents the 'Physics' from knowing future price extremes.
+    STRICTLY CAUSAL Rolling Energy Levels.
+    Ensures that energy walls for bar t are determined ONLY by data up to t-1.
     """
-    # Use rolling window for local max/min
-    df['Rolling_Max'] = df['Close'].rolling(window=window).max()
-    df['Rolling_Min'] = df['Close'].rolling(window=window).min()
+    # Use .shift(1) to ensure the rolling window EXCLUDES the current bar
+    df['Rolling_Max'] = df['Close'].shift(1).rolling(window=window).max()
+    df['Rolling_Min'] = df['Close'].shift(1).rolling(window=window).min()
 
-    # Calculate energy levels row-by-row using ONLY previous 14 days
-    df['E_High'] = df.apply(lambda x: maximum_energy_level(x['Rolling_Max'], x['λ'], market_type), axis=1)
-    df['E_Low'] = df.apply(lambda x: minimum_energy_level(x['Rolling_Min'], x['λ']), axis=1)
+    # Calculate energy levels row-by-row using the shifted extremes
+    # This makes E_High and E_Low known at the Open of bar t.
+    df['E_Low'] = df.apply(lambda x: maximum_energy_level(x['Rolling_Max'], x['λ'], market_type), axis=1)
+    df['E_High'] = df.apply(lambda x: minimum_energy_level(x['Rolling_Min'], x['λ']), axis=1)
 
     df.drop(columns=['Rolling_Max', 'Rolling_Min'], inplace=True)
     df.dropna(inplace=True)

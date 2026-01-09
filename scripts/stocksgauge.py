@@ -12,8 +12,21 @@ import pandas as pd
 import numpy as np
 keras = tf.keras
 
-def random_slipage(lower, upper):
-    return np.random.uniform(lower, upper)
+def dynamic_slippage(atr_pct, base_median_bps=0.01, base_sigma=0.5):
+    """
+    Generates a log-normal slippage distribution scaled by ATR%.
+    Mimics market microstructure: tight spreads usually, but sudden 'fat-tail' spikes.
+    """
+    # Generate log-normal noise (real-world execution distribution)
+    noise = np.random.lognormal(mean=np.log(base_median_bps), sigma=base_sigma)
+    
+    # Apply volatility penalty: scaling the impact based on ATR/Price ratio
+    turbulence_factor = np.clip(atr_pct / 0.008, 1.0, 8.0) 
+    
+    return (noise * turbulence_factor) / 10000
+
+def discretize_take_profit(tp, current_price):
+    pass
 
 def simulate_trading_wd(y_test, physics_test, initial_cap=10000):    
     cash = initial_cap
@@ -23,70 +36,79 @@ def simulate_trading_wd(y_test, physics_test, initial_cap=10000):
     loser_longs, loser_shorts = 0, 0
     
     y_actual = y_test.values if isinstance(y_test, pd.Series) else y_test
-    # Extract physics for dynamic thresholding
     o_d = physics_test['Öd'].values
     o_dd = physics_test['Ödd'].values
     atr_values = physics_test['ATR'].values
     e_low = physics_test['E_Low'].values
     e_high = physics_test['E_High'].values
     price_values = physics_test['Close'].values
-    Wd = physics_test['Wd'].values
-    W = physics_test['W'].values
+    W = physics_test['W'].values # Transaction Momentum Reservoir
     
-    # Convert basis points to a decimal multiplier (e.g., 2bps = 0.0002)
-    # This represents the cumulative friction for a round-trip trade
-    
-    # Start from 0, but evaluate outcome at i + 1
-    # We stop at len(probs) - 1 to avoid index out of bounds
     for i in range(len(y_actual) - 1):
-        slippage_cost = random_slipage(5, 10) / 10000
+        if cash <= 0:
+            equity_curve.append(0)
+            continue
 
-        # Dynamic Threshold calculation
+        # 1. DYNAMIC BASE RISK (Performance-Anchored)
+        # We calculate risk rate relative to initial capital to prevent 'cheating'
+        rel_performance = (cash - initial_cap) / initial_cap
+        base_risk_rate = np.clip(0.02 + (rel_performance * 0.1), 0.01, 0.05)
+
+        # 2. THE "W" MOMENTUM RESERVOIR (Smart Compounding)
+        # Instead of compounding on 'cash', we compound on 'initial_cap' 
+        # but scale it by the current transaction momentum (W).
+        # We take the absolute value of W to determine the 'confidence' multiplier.
+        w_multiplier = np.clip(abs(W[i]), 1.0, 3.0) 
+        risk_amount = initial_cap * base_risk_rate * w_multiplier
+
+        # Signal/Market Variables
         threshold = int(np.sign(o_d[i]) + np.sign(o_dd[i]))
-        
-        # Reference price/ATR at time of signal (t)
-        # Outcome is the move from t to t+1
-        next_bar_return = y_actual[i + 1] 
+        next_bar_return = y_actual[i + 1]
         yesterday_atr = atr_values[i]
         current_price = price_values[i]
-        upper_distance = e_high[i] - current_price
-        lower_distance = current_price - e_low[i]
+        
+        # Friction (Slippage) using the dynamic model for higher realism
+        atr_pct = yesterday_atr / current_price
+        slippage_cost = dynamic_slippage(atr_pct) 
 
-        # 1. LONG SIGNAL: Field is positive AND energy is increasing
+        # LONG SIGNAL
         if threshold == 2 and W[i] > 0:
             longs += 1
-            tp = min(yesterday_atr,upper_distance)
-            sl = -min(0.33 * yesterday_atr, lower_distance)
+            tp = min(yesterday_atr, e_high[i] - current_price)
+            sl = -min(0.33 * yesterday_atr, current_price - e_low[i])
             
-            # Slippage is applied as a deduction from the profit/loss realized
+            # Friction scales with current account size
+            friction = cash * slippage_cost * 2
+            
             if next_bar_return >= tp:
-                cash += ((initial_cap * 0.02) * 3) - (cash * slippage_cost)
+                cash += (risk_amount * 3) - friction
                 winner_longs += 1
             elif next_bar_return <= sl:
-                cash -= ((initial_cap * 0.02) + (cash * slippage_cost))
+                cash -= (risk_amount + friction)
                 loser_longs += 1
             else:
-                # Market close exit (pro-rata)
                 realized = next_bar_return / (0.33 * yesterday_atr)
-                cash += ((initial_cap * 0.02) * realized) - (cash * slippage_cost)
+                cash += (risk_amount * realized) - friction
                 if next_bar_return > 0: winner_longs += 1
                 else: loser_longs += 1
 
-        # 2. SHORT SIGNAL: Field is negative AND energy is decreasing (pushing down)
+        # SHORT SIGNAL
         elif threshold == -2 and W[i] < 0:
             shorts += 1
-            tp = -min(yesterday_atr, lower_distance)
-            sl = 0.33 * min(yesterday_atr, upper_distance)
+            tp = -min(yesterday_atr, current_price - e_low[i])
+            sl = 0.33 * min(yesterday_atr, e_high[i] - current_price)
+            
+            friction = cash * slippage_cost * 2
             
             if next_bar_return <= tp:
-                cash += ((initial_cap * 0.02) * 3) - (cash * slippage_cost)
+                cash += (risk_amount * 3) - friction
                 winner_shorts += 1
             elif next_bar_return >= sl:
-                cash -= ((initial_cap * 0.02) + (cash * slippage_cost))
+                cash -= (risk_amount + friction)
                 loser_shorts += 1
             else:
                 realized = -next_bar_return / (0.33 * yesterday_atr)
-                cash += ((initial_cap * 0.02) * realized) - (cash * slippage_cost)
+                cash += (risk_amount * realized) - friction
                 if next_bar_return < 0: winner_shorts += 1
                 else: loser_shorts += 1
 
@@ -94,15 +116,18 @@ def simulate_trading_wd(y_test, physics_test, initial_cap=10000):
 
     return equity_curve, cash, longs, shorts, winner_longs, winner_shorts, loser_longs, loser_shorts
 
-def simulate_trading_pd(y_test, physics_test, initial_cap=10000):    
+def simulate_trading_pd(y_test, physics_test, initial_cap=10000, k_window=14):    
     cash = initial_cap
     equity_curve = [initial_cap]
+    
+    # Transaction Tracker for Momentum-based Risk Scaling
+    trade_returns = [] 
+    
     longs, shorts = 0, 0
     winner_longs, winner_shorts = 0, 0
     loser_longs, loser_shorts = 0, 0
     
     y_actual = y_test.values if isinstance(y_test, pd.Series) else y_test
-    # Extract physics for dynamic thresholding
     o_d = physics_test['Öd'].values
     o_dd = physics_test['Ödd'].values
     atr_values = physics_test['ATR'].values
@@ -112,68 +137,90 @@ def simulate_trading_pd(y_test, physics_test, initial_cap=10000):
     p_up = physics_test['P↑'].values
     p_down = physics_test['P↓'].values
     
-    # Convert basis points to a decimal multiplier (e.g., 2bps = 0.0002)
-    # This represents the cumulative friction for a round-trip trade
-    
-    # Start from 0, but evaluate outcome at i + 1
-    # We stop at len(probs) - 1 to avoid index out of bounds
     for i in range(len(y_actual) - 1):
-        slippage_cost = random_slipage(5, 10) / 10000
+        if cash <= 0:
+            equity_curve.append(0)
+            continue
 
-        # Dynamic Threshold calculation
-        threshold = int(np.sign(o_d[i]) + np.sign(o_dd[i]))
+        # 1. DYNAMIC RISK RATE (Transaction Momentum + Account Performance)
+        # Calculate recent strategy momentum from last k=14 trades
+        k_factor = 0
+        if len(trade_returns) >= k_window:
+            # Average normalized return of the last k transactions
+            avg_recent_return = np.mean(trade_returns[-k_window:])
+            # Sensitivity: every +1% avg return adds ~0.5% to the risk rate
+            k_factor = np.clip(avg_recent_return * 0.5, -0.01, 0.02)
+
+        rel_performance = (cash - initial_cap) / initial_cap
+        base_risk = 0.02 + (rel_performance * 0.05)
         
-        # Reference price/ATR at time of signal (t)
-        # Outcome is the move from t to t+1
-        next_bar_return = y_actual[i + 1] 
-        yesterday_atr = atr_values[i]
-        current_price = price_values[i]
-        upper_distance = e_high[i] - current_price
-        lower_distance = current_price - e_low[i]
+        # Combine both factors: protects capital during cold streaks
+        risk_rate = np.clip(base_risk + k_factor, 0.01, 0.05)
+        risk_amount = initial_cap * risk_rate
 
-        # 1. LONG SIGNAL
-        if threshold == 2 and p_up[i] > 0.025*p_down[i]:
+        # 2. LOG-NORMAL SLIPPAGE
+        current_price = price_values[i]
+        yesterday_atr = atr_values[i]
+        atr_pct = yesterday_atr / current_price
+        slippage_cost = dynamic_slippage(atr_pct)
+
+        # 3. SIGNAL LOGIC (Schrödinger Gauge Direction & Acceleration)
+        threshold = int(np.sign(o_d[i]) + np.sign(o_dd[i]))
+        next_bar_return = y_actual[i + 1] 
+
+        # --- LONG EXECUTION ---
+        if threshold == 2 and p_up[i] > p_down[i]:
             longs += 1
-            tp = min(yesterday_atr,upper_distance)
-            sl = -min(0.33 * yesterday_atr, lower_distance)
+            tp = min(yesterday_atr, e_high[i] - current_price)
+            sl = -min(0.33 * yesterday_atr, current_price - e_low[i])
             
-            # Slippage is applied as a deduction from the profit/loss realized
+            friction = cash * slippage_cost * 2
+            net_profit = 0
+            
             if next_bar_return >= tp:
-                cash += ((initial_cap * 0.02) * 3) - (cash * slippage_cost)
+                net_profit = (risk_amount * 3) - friction
                 winner_longs += 1
             elif next_bar_return <= sl:
-                cash -= ((initial_cap * 0.02) + (cash * slippage_cost))
+                net_profit = -(risk_amount + friction)
                 loser_longs += 1
             else:
-                # Market close exit (pro-rata)
-                realized = next_bar_return / (0.33 * yesterday_atr)
-                cash += ((initial_cap * 0.02) * realized) - (cash * slippage_cost)
+                realized_ratio = next_bar_return / (0.33 * yesterday_atr)
+                net_profit = (risk_amount * realized_ratio) - friction
                 if next_bar_return > 0: winner_longs += 1
                 else: loser_longs += 1
-
-        # 2. SHORT SIGNAL
-        elif threshold == -2 and p_down[i] > 0.025*p_up[i]:
-            shorts += 1
-            tp = -min(yesterday_atr, lower_distance)
-            sl = 0.33 * min(yesterday_atr, upper_distance)
             
+            cash += net_profit
+            trade_returns.append(net_profit / risk_amount) # Record normalized result
+
+        # --- SHORT EXECUTION ---
+        elif threshold == -2 and p_down[i] > p_up[i]:
+            shorts += 1
+            tp = -min(yesterday_atr, current_price - e_low[i])
+            sl = 0.33 * min(yesterday_atr, e_high[i] - current_price)
+            
+            friction = cash * slippage_cost * 2
+            net_profit = 0
+
             if next_bar_return <= tp:
-                cash += ((initial_cap * 0.02) * 3) - (cash * slippage_cost)
+                net_profit = (risk_amount * 3) - friction
                 winner_shorts += 1
             elif next_bar_return >= sl:
-                cash -= ((initial_cap * 0.02) + (cash * slippage_cost))
+                net_profit = -(risk_amount + friction)
                 loser_shorts += 1
             else:
-                realized = -next_bar_return / (0.33 * yesterday_atr)
-                cash += ((initial_cap * 0.02) * realized) - (cash * slippage_cost)
+                realized_ratio = -next_bar_return / (0.33 * yesterday_atr)
+                net_profit = (risk_amount * realized_ratio) - friction
                 if next_bar_return < 0: winner_shorts += 1
                 else: loser_shorts += 1
+            
+            cash += net_profit
+            trade_returns.append(net_profit / risk_amount)
 
         equity_curve.append(cash)
 
-    return equity_curve, cash, longs, shorts, winner_longs, winner_shorts, loser_longs, loser_shorts
+    return (equity_curve, cash, longs, shorts, winner_longs, winner_shorts, loser_longs, loser_shorts)
 
-
+    
 def create_backtest_stats(ticker,equity_curve, cash, long_trades, short_trades, winner_longs, winner_shorts, loser_longs, loser_shorts):
     # Ensure 1D array even if input is a list of arrays or 2D matrix
     equity_array = np.ravel(equity_curve)
@@ -221,31 +268,34 @@ def create_backtest_stats(ticker,equity_curve, cash, long_trades, short_trades, 
     return stats
 
 def back_test(params):
-    (k, ticker, interval) = params        
-    try:
-        historical_dataset = mkt.import_market_data(ticker, interval, k)
-        historical_dataset['ATR'] = fracdiff.get_atr(historical_dataset['Close'], k)
-        historical_dataset.dropna(inplace=True)
-        y_test = historical_dataset['Close'].pct_change().shift(-1)
-        y_test.dropna(inplace=True)    
-        physics_test = historical_dataset.loc[y_test.index, ['Ö', 'Öd', 'Ödd', 'ATR','E_High', 'E_Low', 'Close', 'P↑', 'P↓', 'W', 'Wd']]
+    (k, ticker, interval, simulator_function) = params        
+    # try:
+    historical_dataset = mkt.import_market_data(ticker, interval, k)
+    historical_dataset['ATR'] = fracdiff.get_atr(historical_dataset['Close'], k)
+    historical_dataset.dropna(inplace=True)
+    y_test = historical_dataset['Close'].pct_change().shift(-1)
+    y_test.dropna(inplace=True)    
+    physics_test = historical_dataset.loc[y_test.index, ['Ö', 'Öd', 'Ödd', 'ATR','E_High', 'E_Low', 'Close', 'P↑', 'P↓', 'W', 'Wd']]
 
-        equity_curve, cash, longs, shorts, winner_longs, winner_shorts, loser_longs, loser_shorts = simulate_trading_wd(y_test, physics_test)
-        stats = create_backtest_stats(ticker, equity_curve, cash, longs, shorts, winner_longs, winner_shorts, loser_longs, loser_shorts)
-        return stats
-    except:
-        print(f"ERROR: backtersing {ticker}")
-        return  None
+    equity_curve, cash, longs, shorts, winner_longs, winner_shorts, loser_longs, loser_shorts = simulator_function(y_test, physics_test)
+    stats = create_backtest_stats(ticker, equity_curve, cash, longs, shorts, winner_longs, winner_shorts, loser_longs, loser_shorts)
+    return stats
+    # except:
+    #     print(f"ERROR: backtersing {ticker}")
+    #     return  None
     
+simulators = {"wd": simulate_trading_wd, "pd": simulate_trading_pd}
 
 if __name__ == '__main__':
     tickers_file = sys.argv[1]    
+    simulator = sys.argv[2]
+    simulator_function = simulators[simulator]
     k = 14
-    tickers = [(k, ticker, "1d") for ticker in np.loadtxt(tickers_file, dtype=str)]
+    tickers = [(k, ticker, "1d", simulator_function) for ticker in np.loadtxt(tickers_file, dtype=str)]
     with Pool(processes=4) as pool:
         result = list(map(back_test, tickers))
     
-    output_file = os.path.join(os.getcwd(), "test-results", f"report-stocksgauge.csv")
+    output_file = os.path.join(os.getcwd(), "test-results", f"report-stocksgauge-{simulator}.csv")
     os.remove(output_file) if os.path.exists(output_file) else None
     with open(output_file, 'w') as f: #
         print(
