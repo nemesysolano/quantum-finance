@@ -1,7 +1,6 @@
 import numpy as np
 import pandas as pd
-
-
+from nn import fracdiff as frac
 from qf.quantum import quantum_lambda
 from qf.quantum import maximum_energy_level, minimum_energy_level
 
@@ -566,5 +565,62 @@ def add_scrodinger_gauge_acceleration(historical_data):
     # Acceleration is the difference of the difference
     df = historical_data
     df['Ödd'] = (df['Öd'] - df['Öd'].shift(1)) / 2
+    df.dropna(inplace=True)
+    return df
+
+
+import numpy as np
+import pandas as pd
+from qf.nn import fracdiff as frac
+import numpy as np
+import pandas as pd
+from nn import fracdiff as frac
+
+def add_diff_time_series(historical_data, k=14):
+    """
+    Implements Differentiated Time Series features using Log-Returns.
+    
+    1. Calculates Log-Returns L(t).
+    2. Estimates fractional d and binomial weights using OLS on L(t).
+    3. Calculates Ds as the dot product of weights and past log-returns.
+    
+    This ensures zero lookahead bias: Ds[t] is known at the Open of bar t.
+    """
+    df = historical_data
+    c = df['Close'].values.flatten()
+    n = len(df)
+    
+    # 1. Generate Log-Returns: L(t) = ln(C_t / C_{t-1})
+    # We use a small epsilon to prevent log(0) errors if price is zero
+    log_returns = np.diff(np.log(c + 1e-9))
+    
+    # Initialize output columns
+    weight_cols = [f'W_{j}' for j in range(k)]
+    for col in weight_cols:
+        df[col] = 0.0
+    df['Ds'] = 0.0
+
+    # 2. Walk-forward estimation
+    # log_returns[0] corresponds to the move ending at index 1
+    # We start at k+1 to ensure enough history for the first OLS fit
+    for i in range(k + 1, n):
+        # CAUSAL STEP: Use log-returns known BEFORE bar i (indices up to i-2)
+        # to estimate weights for the forecast of bar i.
+        history_for_d = log_returns[:i-1]
+        target_for_d = log_returns[i-1]
+        
+        # Estimate d and get binomial weights
+        d_hat = frac.perform_ols_and_fit(history_for_d, target_for_d, k)
+        weights = frac.get_binomial_weights(d_hat, k)
+        
+        # Assign weights to the dataframe for row i
+        df.loc[df.index[i], weight_cols] = weights
+        
+        # 3. Calculate Ds (Differentiated Series)
+        # We apply weights to past log-returns: [L_{i-1}, L_{i-2}, ... L_{i-k}]
+        # This makes Ds[i] the "Forecasted Log-Return" for the current bar i.
+        log_return_window = log_returns[i - k : i][::-1] 
+        df.loc[df.index[i], 'Ds'] = np.dot(weights, log_return_window)
+
     df.dropna(inplace=True)
     return df

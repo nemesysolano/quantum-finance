@@ -260,9 +260,9 @@ is the minimum amount of differentiation that makes a price series stationary wh
 
 ### Differentiated Time Series ###
 
-Let's consider the $X=\{x(1), x(2),..., x(t),...\}$ time series representing an stochastic prices.
+Let's consider the $X=\{L(x(t-k)), L(x(t-k+1)),..., L(x(t-1))\}$ sequence of **logarithmic differences**, we can aproximate $L(x(t))$ from past $k$ observations of $L$ by
 
-$x(t) = \sum^k_{i=1}w_i x(t-i)$ where
+$L(x(t)) ≈ \sum^k_{i=1}w_i L(x(t-i))$ where
 
 $w_0 = 1$ and $w_i = w_{i-1} \frac {i - 1 - d} {i}$
 
@@ -279,9 +279,9 @@ The `estimate_d` function estimates the fractional integration parameter  from a
 
 ##### 1. The Model
 
-We assume the time series  is governed by a fractional process of order , which can be expressed as a linear combination of its past  values:
+We assume the time series  is governed by a fractional process of order , which can be aproimated as a linear combination of its past  values:
 
-$x(t) = \sum^k_{i=1}w_ix(t-i)$
+$L(x(t)) ≈ \sum^k_{i=1}w_i L(x(t-i))$
 
 where the weights  are defined by the binomial recurrence relation:
 
