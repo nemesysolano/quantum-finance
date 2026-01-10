@@ -11,10 +11,7 @@ from sklearn.model_selection import train_test_split
 from sklearn.metrics import accuracy_score, classification_report
 import numpy as np
 keras = tf.keras
-
     
-
-        
 def create_backtest_stats(ticker,equity_curve, cash, long_trades, short_trades, winner_longs, winner_shorts, loser_longs, loser_shorts):
     # Ensure 1D array even if input is a list of arrays or 2D matrix
     equity_array = np.ravel(equity_curve)
@@ -63,7 +60,6 @@ def create_backtest_stats(ticker,equity_curve, cash, long_trades, short_trades, 
 
 def back_test(params):
     (k, ticker, interval, simulator_function) = params        
-    # try:
     historical_dataset = mkt.import_market_data(ticker, interval, k)
     historical_dataset['ATR'] = fracdiff.get_atr(historical_dataset['Close'], k)
     historical_dataset.dropna(inplace=True)
@@ -71,12 +67,10 @@ def back_test(params):
     y_test.dropna(inplace=True)    
     physics_test = historical_dataset.loc[y_test.index, ['Ö', 'Öd', 'Ödd', 'ATR','E_High', 'E_Low', 'Close', 'P↑', 'P↓', 'W', 'Wd','Ds']]
 
-    equity_curve, cash, longs, shorts, winner_longs, winner_shorts, loser_longs, loser_shorts = simulator_function(y_test, physics_test)
+    equity_curve, cash, longs, shorts, winner_longs, winner_shorts, loser_longs, loser_shorts, transaction_log = simulator_function(y_test, physics_test)    
     stats = create_backtest_stats(ticker, equity_curve, cash, longs, shorts, winner_longs, winner_shorts, loser_longs, loser_shorts)
+    stats['transaction_log'] = transaction_log
     return stats
-    # except:
-    #     print(f"ERROR: backtersing {ticker}")
-    #     return  None
     
 simulators = {"wd": simulate_trading_wd, "pd": simulate_trading_pd, "ds": simulate_trading_ds}
 

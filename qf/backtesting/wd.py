@@ -11,6 +11,7 @@ import numpy as np
 keras = tf.keras
 
 def simulate_trading_wd(y_test, physics_test, initial_cap=10000):    
+    transaction_log = []    
     cash = initial_cap
     equity_curve = [initial_cap]
     longs, shorts, winner_longs, winner_shorts, loser_longs, loser_shorts = 0, 0, 0, 0, 0, 0
@@ -68,4 +69,4 @@ def simulate_trading_wd(y_test, physics_test, initial_cap=10000):
                 else: loser_shorts += 1
 
         equity_curve.append(cash)
-    return equity_curve, cash, longs, shorts, winner_longs, winner_shorts, loser_longs, loser_shorts
+    return equity_curve, cash, longs, shorts, winner_longs, winner_shorts, loser_longs, loser_shorts, transaction_log

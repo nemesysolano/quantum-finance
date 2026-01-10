@@ -11,6 +11,7 @@ import numpy as np
 keras = tf.keras
 
 def simulate_trading_pd(y_test, physics_test, initial_cap=10000, k_window=14):    
+    transaction_log = []    
     cash = initial_cap
     equity_curve, trade_returns = [initial_cap], []
     longs, shorts, winner_longs, winner_shorts, loser_longs, loser_shorts = 0, 0, 0, 0, 0, 0
@@ -67,4 +68,4 @@ def simulate_trading_pd(y_test, physics_test, initial_cap=10000, k_window=14):
             cash += net; trade_returns.append(net / risk_amount)
 
         equity_curve.append(cash)
-    return equity_curve, cash, longs, shorts, winner_longs, winner_shorts, loser_longs, loser_shorts
+    return equity_curve, cash, longs, shorts, winner_longs, winner_shorts, loser_longs, loser_shorts, transaction_log

@@ -11,6 +11,8 @@ import numpy as np
 keras = tf.keras
 
 def simulate_trading_ds(y_test, physics_test, initial_cap=10000, k_window=14): 
+    transaction_log = []
+    
     physics_test  = physics_test[physics_test['Ds'] != 0]
     y_test = y_test[y_test.index.isin(physics_test.index)]
     
@@ -69,4 +71,4 @@ def simulate_trading_ds(y_test, physics_test, initial_cap=10000, k_window=14):
             cash += net; trade_returns.append(net / risk_amount)
 
         equity_curve.append(cash)
-    return equity_curve, cash, longs, shorts, winner_longs, winner_shorts, loser_longs, loser_shorts
+    return equity_curve, cash, longs, shorts, winner_longs, winner_shorts, loser_longs, loser_shorts, transaction_log
