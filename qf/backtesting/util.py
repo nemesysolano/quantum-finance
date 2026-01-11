@@ -10,6 +10,21 @@ import numpy as np
 keras = tf.keras
 from typing import NamedTuple
 
+# In util.py
+
+class Position(NamedTuple):
+    ticker: str
+    entry_index: int
+    entry_price: float
+    amount: float      # This can be the quantity or risk_amount depending on your preference
+    side: int          # 1 for Long, -1 for Short
+    tp: float
+    sl: float
+    # New Fields
+    risk_amount: float # The $ amount risked at entry
+    risk_unit: float   # The volatility unit (sl_factor * ATR) used to normalize P/L
+    friction: float    # Transaction cost calculated at entry
+
 class Transaction(NamedTuple):
     ticker: str
     trade_id: int
