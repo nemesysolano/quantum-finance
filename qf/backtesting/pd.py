@@ -67,7 +67,7 @@ def simulate_trading_pd(ticker, y_test, physics_test, reward, initial_cap=10000)
     R = physics_test['R'].values
     Id = physics_test['Id'].values
     Yd = physics_test['Yd'].values
-    o_d = physics_test['Öd'].values
+    o_dd = physics_test['Öd'].values
     W = physics_test['W'].values 
 
     # Stop Loss factor based on Reward Ratio
@@ -97,47 +97,47 @@ def simulate_trading_pd(ticker, y_test, physics_test, reward, initial_cap=10000)
                     if curr_low <= pos.sl:
                         exit_price = pos.sl
                         exit_reason = -1 # SL
-                        net_pl = -(pos.amount + friction_at_entry) # Simplified logic for example
+                        net_pl = -(pos.amount + pos.friction_at_entry) # Simplified logic for example
                         loser_longs += 1
                         exit_signal = True
                     elif curr_high >= pos.tp:
                         exit_price = pos.tp
                         exit_reason = 1 # TP
-                        net_pl = (pos.amount * reward) - friction_at_entry
+                        net_pl = (pos.amount * reward) - pos.friction_at_entry
                         winner_longs += 1
                         exit_signal = True
-                    elif np.sign(o_d[i]) < 0: # Momentum Reversal
+                    elif Id[i] < 0 and M[i] < 0 and Yd[i] < 0: # Momentum Reversal
                         exit_price = price
                         exit_reason = 0 
-                        # Realized P/L calculation based on entry
                         realized_r = (exit_price - pos.entry_price) / (sl_factor * atr_values[pos.entry_index])
-                        net_pl = (pos.amount * realized_r) - friction_at_entry
-                        if net_pl > 0: winner_longs += 1
-                        else: loser_longs += 1
-                        exit_signal = True
+                        net_pl = (pos.amount * realized_r) - pos.friction_at_entry
+
+                        if net_pl > 0:
+                            winner_longs += 1                        
+                            exit_signal = True
 
                 # SHORT EXIT CHECKS
                 elif pos.side == -1:
                     if curr_high >= pos.sl:
                         exit_price = pos.sl
                         exit_reason = -1
-                        net_pl = -(pos.amount + friction_at_entry)
+                        net_pl = -(pos.amount + pos.friction_at_entry)
                         loser_shorts += 1
                         exit_signal = True
                     elif curr_low <= pos.tp:
                         exit_price = pos.tp
                         exit_reason = 1
-                        net_pl = (pos.amount * reward) - friction_at_entry
+                        net_pl = (pos.amount * reward) - pos.friction_at_entry
                         winner_shorts += 1
                         exit_signal = True
-                    elif o_d[i] > 0: # Momentum Reversal
+                    elif Id[i] > 0 and M[i] > 0 and Yd[i] > 0: # Momentum Reversal
                         exit_price = price
                         exit_reason = 0
                         realized_r = (pos.entry_price - exit_price) / (sl_factor * atr_values[pos.entry_index])
                         net_pl = (pos.amount * realized_r) - friction_at_entry
-                        if net_pl > 0: winner_shorts += 1
-                        else: loser_shorts += 1
-                        exit_signal = True
+                        if net_pl > 0: 
+                            winner_shorts += 1
+                            exit_signal = True
 
                 if exit_signal:
                     cash += net_pl
@@ -174,7 +174,7 @@ def simulate_trading_pd(ticker, y_test, physics_test, reward, initial_cap=10000)
                 
                 active_position = Position(
                     ticker=ticker, entry_index=i, entry_price=price,
-                    amount=risk_amount, side=1, tp=price + tp_dist, sl=price - sl_dist
+                    amount=risk_amount, side=1, tp=price + tp_dist, sl=price - sl_dist, friction_at_entry=friction_at_entry
                 )
                 longs += 1
 
@@ -186,7 +186,7 @@ def simulate_trading_pd(ticker, y_test, physics_test, reward, initial_cap=10000)
 
                 active_position = Position(
                     ticker=ticker, entry_index=i, entry_price=price,
-                    amount=risk_amount, side=-1, tp=price - tp_dist, sl=price + sl_dist
+                    amount=risk_amount, side=-1, tp=price - tp_dist, sl=price + sl_dist, friction_at_entry=friction_at_entry
                 )
                 shorts += 1
 

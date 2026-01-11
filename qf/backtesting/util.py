@@ -20,6 +20,7 @@ class Position(NamedTuple):
     side: int          # 1 for Long, -1 for Short
     tp: float
     sl: float
+    friction_at_entry: float
 
 class Transaction(NamedTuple):
     ticker: str

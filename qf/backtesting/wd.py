@@ -1,4 +1,4 @@
-from qf.backtesting.util import Transaction, apply_integer_nudge, dynamic_slippage
+from qf.backtesting.util import Position, Transaction, apply_integer_nudge, dynamic_slippage
 import numpy as np
 
 def simulate_trading_wd(ticker, y_test, physics_test, reward, initial_cap=10000):    
@@ -18,6 +18,7 @@ def simulate_trading_wd(ticker, y_test, physics_test, reward, initial_cap=10000)
 
     # Calculate the SL factor as the inverse of the reward ratio
     sl_factor = 1.0 / reward
+    active_position = None
 
     for i in range(len(y_actual) - 1):
         if cash <= 0:
@@ -32,66 +33,104 @@ def simulate_trading_wd(ticker, y_test, physics_test, reward, initial_cap=10000)
         friction = price * dynamic_slippage(atr/price)
         threshold = int(np.sign(o_d[i]) + np.sign(o_dd[i]))
         
-        next_high = high_values[i+1]
-        next_low = low_values[i+1]
         next_close = price_values[i+1]
-        next_bar_return = next_close - price
+        
+        net_pl = 0
+        exit_reason = 0
 
-        side = 0
-        net = 0
-        reason = 0
+        # 1. CHECK FOR EXIT OF ACTIVE POSITION
+        # If there's an active position, check for exit conditions
+        if active_position is not None:
+            pos = active_position
+            current_low = low_values[i]
+            current_high = high_values[i]
+            exit_signal = False
+            exit_price = price
+            
+            if i > pos.entry_index:
+                if pos.side == 1:
+                    if current_low <= pos.sl:
+                        exit_price = pos.sl
+                        exit_reason = -1
+                        net_pl = -(pos.amount + pos.friction_at_entry)
+                        loser_longs += 1
+                        exit_signal = True
+                    elif current_high >= pos.tp:
+                        exit_price = pos.tp
+                        exit_reason = 1
+                        net_pl = (pos.amount * reward) - pos.friction_at_entry
+                        winner_longs += 1
+                        exit_signal = True
+                    elif W[i] < 0: # Momentum Reversal
+                        exit_price = price
+                        exit_reason = 0
+                        realized_r = (exit_price - pos.entry_price) / (sl_factor * atr_values[pos.entry_index])
+                        net_pl = (pos.amount * realized_r) - pos.friction_at_entry
+                        if net_pl > 0:
+                            winner_longs += 1
+                            exit_signal = True
+                else:
+                    if current_high >= pos.sl:
+                        exit_price = pos.sl
+                        exit_reason = -1
+                        net_pl = -(pos.amount + pos.friction_at_entry)
+                        loser_shorts += 1
+                        exit_signal = True
+                    elif current_low <= pos.tp:
+                        exit_price = pos.tp
+                        exit_reason = 1
+                        net_pl = (pos.amount * reward) - pos.friction_at_entry
+                        winner_shorts += 1
+                        exit_signal = True
+                    elif W[i] > 0: # Momentum Reversal
+                        exit_price = price
+                        exit_reason = 0
+                        realized_r = (pos.entry_price - exit_price) / (sl_factor * atr_values[pos.entry_index])
+                        net_pl = (pos.amount * realized_r) - pos.friction_at_entry
+                        if net_pl > 0:
+                            winner_shorts += 1
+                            exit_signal = True
+            
+            if exit_signal:
+                cash += net_pl
+                transaction_log.append(Transaction(
+                    ticker=ticker,
+                    trade_id=len(transaction_log) + 1,
+                    entry_index=pos.entry_index,
+                    exit_index=i,
+                    duration=i - pos.entry_index,
+                    side=pos.side,
+                    entry_price=pos.entry_price,
+                    exit_price=exit_price,
+                    pl=net_pl,
+                    tp_price=pos.tp,
+                    sl_price=pos.sl,
+                    exit_reason=exit_reason
+                ))
+                active_position = None
+                    
+        if active_position is None:
+            # LONG SIGNAL
+            if Id[i] > 0 and W[i] > 0 and threshold == 2:
+                longs += 1
+                tp_dist = apply_integer_nudge(price, min(atr, e_high[i] - price), True, True)
+                sl_dist = apply_integer_nudge(price, sl_factor * min(atr, price - e_low[i]), False, True)
+                sl_dist = max(sl_dist, price * 0.0001)
+                active_position = Position(
+                    ticker=ticker, entry_index=i, entry_price=price,
+                    amount=risk_amount, side=1, tp=price + tp_dist, sl=price - sl_dist, friction_at_entry=friction
+                )
 
-        # LONG SIGNAL
-        if Id[i] > 0 and W[i] > 0 and threshold == 2:
-            side = 1; longs += 1
-            tp_dist = apply_integer_nudge(price, min(atr, e_high[i] - price), True, True)
-            # Use dynamic sl_factor instead of 0.33
-            sl_dist = apply_integer_nudge(price, sl_factor * min(atr, price - e_low[i]), False, True)
-            sl_dist = max(sl_dist, price * 0.0001)
-                
-            if next_low <= (price - sl_dist): # SL Hit
-                net = -(risk_amount + friction); loser_longs += 1; reason = -1
-            elif next_high >= (price + tp_dist): # TP Hit
-                # Use reward parameter instead of hardcoded 3
-                net = (risk_amount * reward) - friction; winner_longs += 1; reason = 1
-            else:
-                # Use sl_factor to normalize realized profit
-                realized = next_bar_return / (sl_factor * atr)
-                net = (risk_amount * realized) - friction
-                if net > 0 and  (np.sign(o_dd[i]) < 0 and np.sign(o_d[i]) > 0): # Momentum Reversal
-                    reason = 0
-                    if next_bar_return > 0: winner_longs += 1
-                    else: loser_longs += 1
-        # SHORT SIGNAL
-        elif Id[i] < 0 and W[i] < 0 and threshold == -2:
-            side = -1; shorts += 1
-            tp_dist = apply_integer_nudge(price, min(atr, price - e_low[i]), True, False)
-            # Use dynamic sl_factor instead of 0.33
-            sl_dist = apply_integer_nudge(price, sl_factor * min(atr, e_high[i] - price), False, False)
-            sl_dist = max(sl_dist, price * 0.0001)
-
-            if next_high >= (price + sl_dist): # SL Hit
-                net = -(risk_amount + friction); loser_shorts += 1; reason = -1
-            elif next_low <= (price - tp_dist): # TP Hit
-                # Use reward parameter instead of hardcoded 3
-                net = (risk_amount * reward) - friction; winner_shorts += 1; reason = 1
-            else:
-                # Use sl_factor to normalize realized profit
-                realized = -next_bar_return / (sl_factor * atr)
-                net = (risk_amount * realized) - friction
-                if net > 0 and (np.sign(o_dd[i]) > 0 and np.sign(o_d[i]) < 0): # Momentum Reversal
-                    reason = 0
-                    if next_bar_return < 0: winner_shorts += 1
-                    else: loser_shorts += 1
-
-        if side != 0:
-            cash += net
-            transaction_log.append(Transaction(
-                ticker=ticker, trade_id=len(transaction_log), entry_index=i, exit_index=i+1,
-                duration=1, side=side, entry_price=price, exit_price=next_close,
-                pl=net, tp_price=price + (tp_dist if side==1 else -tp_dist),
-                sl_price=price - (sl_dist if side==1 else -sl_dist), exit_reason=reason
-            ))
+            # LONG SIGNAL
+            elif Id[i] < 0 and W[i] < 0 and threshold == -2:
+                shorts += 1
+                tp_dist = apply_integer_nudge(price, min(atr, price - e_low[i]), True, False)
+                sl_dist = apply_integer_nudge(price, sl_factor * min(atr, e_high[i] - price), False, False)
+                sl_dist = max(sl_dist, price * 0.0001)
+                active_position = Position(
+                    ticker=ticker, entry_index=i, entry_price=price,
+                    amount=risk_amount, side=-1, tp=price - tp_dist, sl=price + sl_dist, friction_at_entry=friction
+                )
         equity_curve.append(cash)
 
     return equity_curve, cash, longs, shorts, winner_longs, winner_shorts, loser_longs, loser_shorts, transaction_log
