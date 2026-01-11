@@ -8,15 +8,35 @@ from sklearn.model_selection import train_test_split
 from sklearn.metrics import accuracy_score, classification_report
 import numpy as np
 keras = tf.keras
+from typing import NamedTuple
 
-def dynamic_slippage(atr_pct, base_median_bps=0.01, base_sigma=0.5):
+class Transaction(NamedTuple):
+    ticker: str
+    trade_id: int
+    entry_index: int
+    exit_index: int
+    duration: int
+    side: int
+    entry_price: float
+    exit_price: float
+    pl: float # profit or loss
+    tp_price: float
+    sl_price: float
+    exit_reason: int # -1 stop loss, 0 bar close, -1 take profit
+
+# Suggested Stress-Test Version
+def dynamic_slippage(atr_pct, base_median_bps=1.0, base_sigma=0.8):
     """
-    Generates a log-normal slippage distribution scaled by ATR%.
+    Simulates realistic friction. 1.0 bps = 0.01% of price.
     """
     noise = np.random.lognormal(mean=np.log(base_median_bps), sigma=base_sigma)
+    # Scale cost by volatility (ATR)
     turbulence_factor = np.clip(atr_pct / 0.008, 1.0, 8.0) 
     return (noise * turbulence_factor) / 10000
 
+def random_slippage(): # just a random nummber between 0.01 and 0.10
+    return np.random.uniform(0.01, 0.10)
+    
 def apply_integer_nudge(price, dist, is_tp, is_long):
     """
     Adjusts the target distance to avoid clustering exactly on integer levels.

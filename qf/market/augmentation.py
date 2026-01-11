@@ -111,10 +111,10 @@ def add_directional_probabilities(historical_data, epsilon=9**-5):
     """
     Calculates directional probabilities P↑(t) and P↓(t) based on structural breaches.
     
-    This implementation follows the requirements from the README:
-    - Uses the Serial Bounded Ratio δ(x(t)) instead of Squared Serial Difference.
-    - Applies the Logarithmic Filter ρ(x) to the price ratio.
-    - Ensures probabilities are complementary where P↑(t) + P↓(t) = 1 (when δ=1).
+    This implementation follows the formulas from the documentation:
+    - Normalizes probabilities using the denominator: S(t)·δ(x(t)) + 1 - S(t)
+    - Ensures P↑(t) + P↓(t) = 1.
+    - Applies the Logarithmic Filter ρ(x) to the price ratio to get δ(x(t)).
     """
     df = historical_data
     n = len(df)
@@ -133,35 +133,42 @@ def add_directional_probabilities(historical_data, epsilon=9**-5):
     c = df['Close'].values
     c_prev = df['Close'].shift(1).values
     
-    # The README specifies a strictly positive time series for the ratio
-    # np.maximum ensures the ratio is at least ε to prevent log(0) errors
+    # Use 1e-9 to prevent division by zero; np.maximum handles the epsilon boundary
     raw_ratio = c / (c_prev + 1e-9) 
     bounded_input = np.maximum(raw_ratio, epsilon)
     
-    # Apply the logarithmic filter to calculate δ(c(t))
-    # We clip the input to 1.0 as the filter domain is x ∈ (ε, 1]
+    # Apply logarithmic filter; domain is x ∈ (ε, 1] as per documentation
     delta_ct = rho(np.minimum(bounded_input, 1.0)) 
 
     # 3. Apply Probability Mapping based on Breach Case
     for t in range(1, n):
-        st = df['S'].iloc[t]   # Swing Ratio (Bounded [0, 1])
+        st = df['S'].iloc[t]   # Swing Ratio S(t)
         gd = df['Gd'].iloc[t]  # Breach Direction (1: Resistance, -1: Support)
-        d_val = delta_ct[t]    # Serial Bounded Ratio
+        d_val = delta_ct[t]    # Serial Bounded Ratio δ(x(t))
         
-        # Resistance Breach Case (Descending Trend Violation)
-        # Current gap exerts downward pressure
-        if gd == 1:
-            p_down[t] = st * d_val
-            p_up[t] = 1.0 - st
+        # Calculate the common denominator for normalization
+        # Denom = S(t)·δ(x(t)) + 1 - S(t)
+        denom = (st * d_val) + (1.0 - st)
+        
+        # Add a small stability epsilon to prevent division by zero
+        denom = max(denom, 1e-9)
+
+        if gd == 1: 
+            # Resistance Breach Case: Gap exerts downward pressure
+            # P↓(t) = [S(t)·δ(x(t))] / Denom
+            # P↑(t) = [1 - S(t)] / Denom
+            p_down[t] = (st * d_val) / denom
+            p_up[t] = (1.0 - st) / denom
             
-        # Support Breach Case (Ascending Trend Violation)
-        # Current gap exerts upward pressure
         elif gd == -1:
-            p_up[t] = st * d_val
-            p_down[t] = 1.0 - st
+            # Support Breach Case: Gap exerts upward pressure
+            # P↑(t) = [S(t)·δ(x(t))] / Denom
+            # P↓(t) = [1 - S(t)] / Denom
+            p_up[t] = (st * d_val) / denom
+            p_down[t] = (1.0 - st) / denom
             
-        # Default/Equilibrium state (No breach history)
         else:
+            # Default/Equilibrium state if no structural breach is active
             p_up[t] = 0.5
             p_down[t] = 0.5
             

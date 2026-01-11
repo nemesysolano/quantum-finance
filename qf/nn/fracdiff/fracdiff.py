@@ -35,27 +35,33 @@ def is_binary_event(atr_history, window=20, threshold=2.5):
     z_score = (atr_history[-1] - mean_vol) / (std_vol + 1e-9)
     return z_score > threshold
 
-def get_atr(y_actual, window=14):
+def get_atr(y_actual, window=14, use_percent=True):
     """
-    Calculates an ATR-like volatility measure with a standard deviation 
-    component to handle regime shifts and noise expansion.
+    Calculates a Normalized ATR (ATR%) or standard ATR with a noise buffer.
+    ATR% = ((Mean_Range + 1.5*Std_Range) / Price) * 100
     """
     if len(y_actual) < window + 1:
         return np.zeros(len(y_actual))
     
     diffs = np.abs(np.diff(y_actual))
-    atr = np.zeros(len(y_actual))
+    atr_values = np.zeros(len(y_actual))
     
     for i in range(window, len(y_actual)):
-        # Calculate trailing mean and std for a robust volatility buffer
         window_diffs = diffs[i-window:i]
         vol_mean = np.mean(window_diffs)
         vol_std = np.std(window_diffs)
-        # Combine mean and std to create a 'Noise Band'
-        atr[i] = vol_mean + (1.5 * vol_std)
+        
+        # Robust Noise Band
+        raw_vol = vol_mean + (1.5 * vol_std)
+        
+        if use_percent:
+            # Normalize by current price to get ATR%
+            atr_values[i] = (raw_vol / y_actual[i]) * 100
+        else:
+            atr_values[i] = raw_vol
     
-    atr[:window] = atr[window]
-    return atr
+    atr_values[:window] = atr_values[window]
+    return atr_values
 
 def get_binomial_weights(d, k):
     """

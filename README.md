@@ -49,9 +49,18 @@ Let's highlight some important points about $L(a,b)$:
 Consider two elements $x(t)$ and $x(t-k)$ from strictly positive time series $x$ where $t$ is the time index. The **serial bounded ratio** $δ(x(t), k)$ from $t$ backwards to $t-k$ is
 
 $δ(x(t), k) = ρ(\max(\frac{x(t)}{x(t-k)}, ε))$
+
+We can also have a **clamped bouned ratio** ($\hat δ(x(t), k)$)defined as
+
+$\hat δ(x(t), k) = \mathbf {clamp} (ρ(\max(\frac{x(t)}{x(t-k)}, ε)),𝛼,1)$
+
+For simplicity $ε$ = $𝛼$ = $9^{-5}$.
+
 ---
 
-if $k = 1$ we can rewrite serial difference, squared serial difference, serial bounded ratio and logarithmic serial differenceas $Δ(x(t))$, $Δ^2(x(t))$, $δ(x(t))$ and $L(x(t))$ respectively.
+if $k = 1$ we can rewrite serial difference, squared serial difference, serial bounded ratio, logarithmic serial differenceas and clamped bounded ratio as:
+
+$Δ(x(t))$, $Δ^2(x(t))$, $δ(x(t))$, $L(x(t))$ and $\hat δ(x(t))$ respectively.
 
 
 ## The Breaking Gap ##
@@ -98,14 +107,28 @@ The mapping of S(t) to these probabilities depends on whether the last structura
 
 If the last structural breach G_b was a **resistance breach**, the current gap exerts downward pressure:
 
-* $P_↓(t) = S(t)⋅δ(x(t))$
-* $P_↑(t) = 1 - S(t)$
+$P_↓(t) = \frac{S(t)⋅δ(x(t))}{S(t)⋅δ(x(t)) + 1 - S(t)}$
+
+$P_↑(t) = \frac{1-S(t)}{S(t)⋅δ(x(t)) + 1 - S(t)}$
 
 ### Support Breach Case (Ascending Trend Violation) ###
 If the last structural breach G_b was a **support breach**, the current gap exerts upward pressure:
 
-* $P_↑(t) = S(t)⋅δ(x(t))$
-* $P_↓(t) = 1 - S(t)$
+$P_↑(t) = \frac{S(t)⋅δ(x(t))}{S(t)⋅δ(x(t)) + 1 - S(t)}$
+
+$P_↓(t) = \frac{1-S(t)}{S(t)⋅δ(x(t)) + 1 - S(t)}$
+
+### Average Momentum $M(t)$ ###
+
+Let e$ be the euler constant and $Δ(c(t))$ is the serial difference of close price, then let's define 
+**upwards ($M_↑(t)$) an downward momentum($M_↓(t)$)** as
+
+$M_↑(t) = Δ(c(t)) e^{(P_↑(t) - P_↓(t))}$
+
+$M_↓(t) = Δ(c(t)) e^{(P_↓(t) - P_↑(t))}$
+
+---
+If we sum ($M(t) = M_↑(t) + M_↓(t)$) the upwards an downwards momentum, we get the **average momentum**. 
 
 
 ## Price-Volume Oscillator ##
