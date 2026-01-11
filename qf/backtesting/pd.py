@@ -63,7 +63,8 @@ def simulate_trading_pd(ticker, y_test, physics_test, reward=3, initial_cap=1000
     Id = physics_test['Id'].values
     M = physics_test['M'].values
     R = physics_test['R'].values
-    
+    Yd = physics_test['Yd'].values
+
     # Calculate the SL factor as the inverse of the reward ratio
     sl_factor = 1.0 / reward
 
@@ -90,7 +91,7 @@ def simulate_trading_pd(ticker, y_test, physics_test, reward=3, initial_cap=1000
         reason = 0
 
         # LONG SIGNAL
-        if Id[i] > 0 and R[i] > 2 and M[i] > 0:
+        if Id[i] > 0 and R[i] > 2 and M[i] > 0 and Yd[i] > 0:
             side = 1; longs += 1
             tp_dist = apply_integer_nudge(price, min(atr, e_high[i] - price), True, True)
             # Use dynamic sl_factor instead of 0.33
@@ -106,12 +107,12 @@ def simulate_trading_pd(ticker, y_test, physics_test, reward=3, initial_cap=1000
                 # Use sl_factor to normalize realized profit
                 realized = next_bar_return / (sl_factor * atr)
                 net = (risk_amount * realized) - friction
-                if net > 0 and  (np.sign(o_dd[i]) < 0 and np.sign(o_d[i]) > 0): # Momentum Reversal
+                if net > 0 and  np.sign(o_d[i]) < 0: # Momentum Reversal
                     reason = 0
                     if next_bar_return > 0: winner_longs += 1
                     else: loser_longs += 1
         # SHORT SIGNAL
-        elif Id[i] < 0 and R[i] > 2 and M[i] < 0:
+        elif Id[i] < 0 and R[i] > 2 and M[i] < 0 and Yd[i] < 0:
             side = -1; shorts += 1
             tp_dist = apply_integer_nudge(price, min(atr, price - e_low[i]), True, False)
             # Use dynamic sl_factor instead of 0.33
@@ -127,7 +128,7 @@ def simulate_trading_pd(ticker, y_test, physics_test, reward=3, initial_cap=1000
                 # Use sl_factor to normalize realized profit
                 realized = -next_bar_return / (sl_factor * atr)
                 net = (risk_amount * realized) - friction
-                if net > 0 and (np.sign(o_dd[i]) > 0 and np.sign(o_d[i]) < 0): # Momentum Reversal
+                if net > 0 and o_d[i] > 0: # Momentum Reversal
                     reason = 0
                     if next_bar_return < 0: winner_shorts += 1
                     else: loser_shorts += 1

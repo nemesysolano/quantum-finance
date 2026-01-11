@@ -82,7 +82,7 @@ def back_test(params):
         historical_dataset.dropna(inplace=True)
         y_test = historical_dataset['Close'].pct_change().shift(-1)
         y_test.dropna(inplace=True)    
-        physics_test = historical_dataset.loc[y_test.index, ['Ö', 'Öd', 'Ödd', 'ATR','E_High', 'E_Low', 'Close', 'High', 'Low',  'M', 'Mσ', 'R', 'W', 'Wd','Id']]
+        physics_test = historical_dataset.loc[y_test.index, ['Ö', 'Öd', 'Ödd', 'ATR','E_High', 'E_Low', 'Close', 'High', 'Low',  'M', 'Mσ', 'R', 'W', 'Wd','Id', 'Yd']]
 
         equity_curve, cash, longs, shorts, winner_longs, winner_shorts, loser_longs, loser_shorts, transaction_log = simulator_function(ticker, y_test, physics_test, reward)    
         stats = create_backtest_stats(ticker, equity_curve, cash, longs, shorts, winner_longs, winner_shorts, loser_longs, loser_shorts)
