@@ -1,7 +1,7 @@
 from qf.backtesting.util import Transaction, apply_integer_nudge, dynamic_slippage
 import numpy as np
 
-def simulate_trading_wd(ticker, y_test, physics_test, reward=3, initial_cap=10000, k_window=14):    
+def simulate_trading_wd(ticker, y_test, physics_test, reward, initial_cap=10000):    
     transaction_log = []    
     cash = initial_cap
     equity_curve = [initial_cap]

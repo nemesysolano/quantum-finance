@@ -20,10 +20,6 @@ class Position(NamedTuple):
     side: int          # 1 for Long, -1 for Short
     tp: float
     sl: float
-    # New Fields
-    risk_amount: float # The $ amount risked at entry
-    risk_unit: float   # The volatility unit (sl_factor * ATR) used to normalize P/L
-    friction: float    # Transaction cost calculated at entry
 
 class Transaction(NamedTuple):
     ticker: str
