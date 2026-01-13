@@ -45,8 +45,9 @@ def get_atr(y_actual, window=14, use_percent=True):
     
     diffs = np.abs(np.diff(y_actual))
     atr_values = np.zeros(len(y_actual))
-    
+    index = y_actual.index
     for i in range(window, len(y_actual)):
+        t = index[i]
         window_diffs = diffs[i-window:i]
         vol_mean = np.mean(window_diffs)
         vol_std = np.std(window_diffs)
@@ -56,7 +57,7 @@ def get_atr(y_actual, window=14, use_percent=True):
         
         if use_percent:
             # Normalize by current price to get ATR%
-            atr_values[i] = (raw_vol / y_actual[i]) * 100
+            atr_values[i] = (raw_vol / y_actual[t]) * 100
         else:
             atr_values[i] = raw_vol
     

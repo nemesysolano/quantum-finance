@@ -608,3 +608,12 @@ def add_average_momentum(historical_data, k=14):
     df.dropna(inplace=True)
     
     return df
+
+def add_quantum_indicators(ticker, historical_data, market_type, lookback_periods):
+    """
+    Wrapper function to add all quantum indicators to the historical data.
+    """
+    add_quantum_lambda(ticker, historical_data, lookback_periods)
+    add_boundary_energy_levels(historical_data,market_type, lookback_periods)
+    add_scrodinger_gauge(historical_data)
+    add_scrodinger_gauge_differences(historical_data, lookback_periods)
