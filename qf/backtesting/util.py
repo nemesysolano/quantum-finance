@@ -35,6 +35,7 @@ class Transaction(NamedTuple):
     tp_price: float
     sl_price: float
     exit_reason: int # -1 stop loss, 0 bar close, -1 take profit
+    friction_at_entry: float
 
 # Suggested Stress-Test Version
 def dynamic_slippage(atr_pct, base_median_bps=1.0, base_sigma=0.8):

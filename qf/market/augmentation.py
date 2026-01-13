@@ -4,6 +4,39 @@ from nn import fracdiff as frac
 from qf.quantum import quantum_lambda
 from qf.quantum import maximum_energy_level, minimum_energy_level
 
+def add_diff_time_series(historical_data, column_name, diff_column_name, k):
+    """
+    Calculates speed of column identified by column_name (referred as L in the documentation).
+    """
+    df = historical_data
+    log_returns  = df[column_name].values.flatten()
+    n = len(df)
+    
+    # Initialize output columns
+    df[diff_column_name] = 0.0
+
+    # 2. Walk-forward estimation
+    # log_returns[0] corresponds to the move ending at index 1
+    # We start at k+1 to ensure enough history for the first OLS fit
+    for i in range(k + 1, n):
+        # CAUSAL STEP: Use log-returns known BEFORE bar i (indices up to i-2)
+        # to estimate weights for the forecast of bar i.
+        history_for_d = log_returns[:i-1]
+        target_for_d = log_returns[i-1]
+        
+        # Estimate d and get binomial weights
+        d_hat = frac.perform_ols_and_fit(history_for_d, target_for_d, k)
+        weights = frac.get_binomial_weights(d_hat, k)
+        
+        # 3. Calculate Ds (Differentiated Series)
+        # We apply weights to past log-returns: [L_{i-1}, L_{i-2}, ... L_{i-k}]
+        # This makes Ds[i] the "Forecasted Log-Return" for the current bar i.
+        log_return_window = log_returns[i - k : i][::-1] 
+        df.loc[df.index[i], diff_column_name] = np.dot(weights, log_return_window)
+
+    df.dropna(inplace=True)
+    return df
+
 def add_breaking_gap(historical_data, Q=0.0001):
     """
     Calculates the breaking gap G(t) based on structural breaches and decay.
@@ -177,8 +210,13 @@ def add_directional_probabilities(historical_data, epsilon=9**-5):
     df.dropna(inplace=True)
     return df
 
+def add_price_volume_speed(historical_data, k):
+    add_diff_time_series(historical_data, 'Y', 'Yd', k)
 
-def add_price_volume_oscillator(historical_data):
+def add_price_volume_acceleration(historical_data, k):
+    add_diff_time_series(historical_data, 'Yd', 'Ydd', k)
+
+def add_price_volume_oscillator(historical_data, k):
     """
     Calculates the price-volume oscillator Y(t).
     
@@ -223,8 +261,10 @@ def add_price_volume_oscillator(historical_data):
     else:
         # 4. Calculate Y(t)
         df['Y'] = delta_p
-        
+    
     df.dropna(inplace=True)
+    add_price_volume_speed(df, k)
+    add_price_volume_acceleration(df, k)
     return df
 
 def add_price_time_angles(historical_data, epsilon=1e-9):
@@ -440,38 +480,6 @@ def add_probability_differences(historical_data):
     df.dropna(inplace=True)
     return df
 
-
-def add_price_volume_differences(historical_data):
-    """
-    Calculates the Price-Volume Difference (Yd) using the oscillator Y.
-    
-    Formula: Yd(t) = Δ(Y(t)) = Bounded percentage difference of Y at k=1.
-    
-    Args:
-        historical_data (pd.DataFrame): Dataframe containing 'Y'.
-        
-    Returns:
-        pd.DataFrame: Dataframe with added 'Yd' column.
-    """
-    df = historical_data
-    
-    # Extract current and previous values of the oscillator Y
-    y = df['Y'].values
-    y_prev = df['Y'].shift(1).values
-    
-    # Calculate Bounded Percentage Difference: Δ%(a, b) = (b-a) / (|a| + |b|)
-    # This represents the Serial Difference Δ(Y(t), 1)
-    # Epsilon added to denominator to ensure stability
-    numerator = y - y_prev
-    denominator = np.abs(y) + np.abs(y_prev) + 1e-9
-    
-    df['Yd'] = numerator / denominator
-    
-    # Fill the initial NaN resulting from the lookback
-    df.dropna(inplace=True)
-    
-    return df
-
 def add_quantum_lambda(ticker, historical_data, lookback_periods):
     """
     Calculates the quantum lambda (λ) using an fixed window to prevent data leakage.
@@ -519,7 +527,7 @@ def add_scrodinger_gauge(historical_data):
     Calculates the Schrödinger Gauge (Ö) based on the current price 
     and the quantum boundary energy levels.
     
-    Formula: $Ö(t) = \log (C(t) /\sqrt(E_{low}(t) * E_{high}(t)$
+    Formula: $Ö(t) = log (C(t) sqrt(E_{low}(t) * E_{high}(t)$
     
     Args:
         historical_data (pd.DataFrame): Dataframe containing 'Close', 
@@ -541,7 +549,7 @@ def add_scrodinger_gauge(historical_data):
     
     return df
 
-def add_scrodinger_gauge_differences(historical_data):
+def add_scrodinger_gauge_differences(historical_data, k):
     """
     Calculates the Schrödinger Gauge Difference (Öd).
     
@@ -555,79 +563,48 @@ def add_scrodinger_gauge_differences(historical_data):
     """
     df = historical_data
     
-    # Extract current and previous gauge values
-    o_curr = df['Ö'].values
-    o_prev = df['Ö'].shift(1).values
-    
-    # Calculate the difference normalized by 2.
-    # Since Ö is bounded [-1, 1], the maximum possible difference is 2.
-    # Dividing by 2 ensures Öd is also bounded within [-1, 1].
-    df['Öd'] = (o_curr - o_prev) / 2.0
-    
-    # Fill the initial NaN resulting from the shift
+    add_diff_time_series(historical_data, 'Ö', 'Öd', k)
+    df.dropna(inplace=True)
+    add_diff_time_series(df, 'Öd', 'Ödd', k)
     df.dropna(inplace=True)
     return df
 
-def add_scrodinger_gauge_acceleration(historical_data):
-    # Acceleration is the difference of the difference
-    df = historical_data
-    df['Ödd'] = (df['Öd'] - df['Öd'].shift(1)) / 2
-    df.dropna(inplace=True)
-    return df
-
-
-import numpy as np
-import pandas as pd
-from qf.nn import fracdiff as frac
-import numpy as np
-import pandas as pd
-from nn import fracdiff as frac
-
-def add_diff_time_series(historical_data, k=14):
+def add_average_momentum(historical_data, k=14):
     """
-    Implements Differentiated Time Series features using Log-Returns.
+    Calculates Average Momentum M(t) and its Signal Line Mσ (EMA).
     
-    1. Calculates Log-Returns L(t).
-    2. Estimates fractional d and binomial weights using OLS on L(t).
-    3. Calculates Ds as the dot product of weights and past log-returns.
-    
-    This ensures zero lookahead bias: Ds[t] is known at the Open of bar t.
+    Args:
+        historical_data (pd.DataFrame): Dataframe containing 'Close', 'P↑', and 'P↓'.
+        k (int): Period for the Exponential Moving Average of M.
+        
+    Returns:
+        pd.DataFrame: Dataframe with added 'M' and 'Mσ' columns.
     """
     df = historical_data
-    c = df['Close'].values.flatten()
-    n = len(df)
     
-    # 1. Generate Log-Returns: L(t) = ln(C_t / C_{t-1})
-    # We use a small epsilon to prevent log(0) errors if price is zero
-    log_returns = np.diff(np.log(c + 1e-9))
+    # 1. Bounded Percentage Difference: Δ_%(c(t-1), c(t))
+    c = df['Close'].values
+    c_prev = df['Close'].shift(1).values
+    delta_c = (c - c_prev) / (np.abs(c) + np.abs(c_prev) + 1e-12)
     
-    # Initialize output columns
-    weight_cols = [f'W_{j}' for j in range(k)]
-    for col in weight_cols:
-        df[col] = 0.0
-    df['Ds'] = 0.0
+    # 2. Extract Probabilities
+    p_up = df['P↑'].values
+    p_down = df['P↓'].values
+    
+    # 3. Calculate Components: M = Δc * e^(P↑ - P↓) + Δc * e^(P↓ - P↑)
+    # This simplifies to M = 2 * Δc * cosh(P↑ - P↓)
+    diff_p = p_up - p_down
+    m_t = delta_c * (np.exp(diff_p) + np.exp(-diff_p))
+    
+    df['M'] = m_t
+    
+    # 4. Calculate Signal Line Mσ using EMA
+    # Mσ acts as a trend filter for the momentum itself
+    df['Mσ'] = df['M'].ewm(span=k, adjust=False).mean()
+    
+    R = np.abs(df['M'] / (df['Mσ'] + 0.0001))
 
-    # 2. Walk-forward estimation
-    # log_returns[0] corresponds to the move ending at index 1
-    # We start at k+1 to ensure enough history for the first OLS fit
-    for i in range(k + 1, n):
-        # CAUSAL STEP: Use log-returns known BEFORE bar i (indices up to i-2)
-        # to estimate weights for the forecast of bar i.
-        history_for_d = log_returns[:i-1]
-        target_for_d = log_returns[i-1]
-        
-        # Estimate d and get binomial weights
-        d_hat = frac.perform_ols_and_fit(history_for_d, target_for_d, k)
-        weights = frac.get_binomial_weights(d_hat, k)
-        
-        # Assign weights to the dataframe for row i
-        df.loc[df.index[i], weight_cols] = weights
-        
-        # 3. Calculate Ds (Differentiated Series)
-        # We apply weights to past log-returns: [L_{i-1}, L_{i-2}, ... L_{i-k}]
-        # This makes Ds[i] the "Forecasted Log-Return" for the current bar i.
-        log_return_window = log_returns[i - k : i][::-1] 
-        df.loc[df.index[i], 'Ds'] = np.dot(weights, log_return_window)
-
+    df['R'] = R
     df.dropna(inplace=True)
+    
     return df

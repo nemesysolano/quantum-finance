@@ -2,47 +2,7 @@ from qf.backtesting.util import Transaction, apply_integer_nudge, dynamic_slippa
 import numpy as np
 import pandas as pd
 
-def add_average_momentum(historical_data, k=14):
-    """
-    Calculates Average Momentum M(t) and its Signal Line Mσ (EMA).
-    
-    Args:
-        historical_data (pd.DataFrame): Dataframe containing 'Close', 'P↑', and 'P↓'.
-        k (int): Period for the Exponential Moving Average of M.
-        
-    Returns:
-        pd.DataFrame: Dataframe with added 'M' and 'Mσ' columns.
-    """
-    df = historical_data
-    
-    # 1. Bounded Percentage Difference: Δ_%(c(t-1), c(t))
-    c = df['Close'].values
-    c_prev = df['Close'].shift(1).values
-    delta_c = (c - c_prev) / (np.abs(c) + np.abs(c_prev) + 1e-12)
-    
-    # 2. Extract Probabilities
-    p_up = df['P↑'].values
-    p_down = df['P↓'].values
-    
-    # 3. Calculate Components: M = Δc * e^(P↑ - P↓) + Δc * e^(P↓ - P↑)
-    # This simplifies to M = 2 * Δc * cosh(P↑ - P↓)
-    diff_p = p_up - p_down
-    m_t = delta_c * (np.exp(diff_p) + np.exp(-diff_p))
-    
-    df['M'] = m_t
-    
-    # 4. Calculate Signal Line Mσ using EMA
-    # Mσ acts as a trend filter for the momentum itself
-    df['Mσ'] = df['M'].ewm(span=k, adjust=False).mean()
-    
-    R = np.abs(df['M'] / (df['Mσ'] + 0.0001))
-
-    df['R'] = R
-    df.dropna(inplace=True)
-    
-    return df
-
-def simulate_trading_pd(ticker, y_test, physics_test, reward, initial_cap=10000):    
+def simulate_trading_yd(ticker, y_test, physics_test, reward, initial_cap=10000):    
     transaction_log = []    
     cash = initial_cap
     equity_curve = [initial_cap]
@@ -63,13 +23,9 @@ def simulate_trading_pd(ticker, y_test, physics_test, reward, initial_cap=10000)
     e_low = physics_test['E_Low'].values
     e_high = physics_test['E_High'].values
     
-    M = physics_test['M'].values
-    R = physics_test['R'].values
-    Id = physics_test['Id'].values
-    Yd = physics_test['Yd'].values
-    o_dd = physics_test['Öd'].values
-    W = physics_test['W'].values 
-
+    Yd = physics_test['Yd'].values # Momentum is used for exits
+    Ydd = physics_test['Ydd'].values # Acceleration is used for entries
+  
     # Stop Loss factor based on Reward Ratio
     sl_factor = 1.0 / reward
 
@@ -106,7 +62,7 @@ def simulate_trading_pd(ticker, y_test, physics_test, reward, initial_cap=10000)
                         net_pl = (pos.amount * reward) - pos.friction_at_entry
                         winner_longs += 1
                         exit_signal = True
-                    elif Id[i] < 0 and M[i] < 0 and Yd[i] < 0: # Momentum Reversal
+                    elif Yd[i] > 0 and Ydd[i] < 0 or price > e_high[i]: # Momentum Reversal
                         exit_price = price
                         exit_reason = 0 
                         realized_r = (exit_price - pos.entry_price) / (sl_factor * atr_values[pos.entry_index])
@@ -130,7 +86,7 @@ def simulate_trading_pd(ticker, y_test, physics_test, reward, initial_cap=10000)
                         net_pl = (pos.amount * reward) - pos.friction_at_entry
                         winner_shorts += 1
                         exit_signal = True
-                    elif Id[i] > 0 and M[i] > 0 and Yd[i] > 0: # Momentum Reversal
+                    elif Yd[i] < 0 and Ydd[i] > 0 or price < e_low[i]: # Momentum Reversal
                         exit_price = price
                         exit_reason = 0
                         realized_r = (pos.entry_price - exit_price) / (sl_factor * atr_values[pos.entry_index])
@@ -153,7 +109,8 @@ def simulate_trading_pd(ticker, y_test, physics_test, reward, initial_cap=10000)
                         pl=net_pl,
                         tp_price=pos.tp,
                         sl_price=pos.sl,
-                        exit_reason=exit_reason
+                        exit_reason=exit_reason,
+                        friction_at_entry=pos.friction_at_entry
                     ))
                     active_position = None
 
@@ -161,13 +118,13 @@ def simulate_trading_pd(ticker, y_test, physics_test, reward, initial_cap=10000)
         if active_position is None:
             rel_perf = (cash - initial_cap) / initial_cap
             risk_rate = np.clip(0.02 + (rel_perf * 0.1), 0.01, 0.05)
-            risk_amount = initial_cap * risk_rate * np.clip(abs(W[i]), 1.0, 3.0)
+            risk_amount = initial_cap * risk_rate
             
             atr = atr_values[i]
             friction_at_entry = price * dynamic_slippage(atr/price) # Captured at entry for exit calc
             
             # LONG SIGNAL
-            if Id[i] > 0 and R[i] > 2 and M[i] > 0 and Yd[i] > 0:
+            if Yd[i] < 0 and Ydd[i] > 0:
                 tp_dist = apply_integer_nudge(price, min(atr, e_high[i] - price), True, True)
                 sl_dist = apply_integer_nudge(price, sl_factor * min(atr, price - e_low[i]), False, True)
                 sl_dist = max(sl_dist, price * 0.0001)
@@ -179,7 +136,7 @@ def simulate_trading_pd(ticker, y_test, physics_test, reward, initial_cap=10000)
                 longs += 1
 
             # SHORT SIGNAL
-            elif Id[i] < 0 and R[i] > 2 and M[i] < 0 and Yd[i] < 0:
+            elif Yd[i] > 0 and Ydd[i] < 0:
                 tp_dist = apply_integer_nudge(price, min(atr, price - e_low[i]), True, False)
                 sl_dist = apply_integer_nudge(price, sl_factor * min(atr, e_high[i] - price), False, False)
                 sl_dist = max(sl_dist, price * 0.0001)

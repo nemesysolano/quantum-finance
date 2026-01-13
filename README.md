@@ -360,7 +360,7 @@ where $P_d(t-k) = P_↑(t-k) - P_↓(t-k)$
 
 ### Price-Volume Difference Forecast ###
 
-This model forecasts ****price-volume difference**** at time $t$, denoted as $Y_d(t)$, from last $k$ consecutive $\frac{Y(t) - Y(t-1)}{2}$ differences.
+This model forecasts ****price-volume difference**** at time $t$, denoted as $Y_d(t)$, from last $k$ consecutive serial differences.
 
 #### Prediction Target ####
 
@@ -368,13 +368,13 @@ The **price-volume difference** difference $Y_d(t)$ mentioned above and defined 
 
 #### Input Features ####
 
-The model uses a fixed **lookback window of $k$ bars** (from $t-1$ to $t-k$) and the features are past ****price-volume difference** defined below:
+The model uses a fixed **lookback window of $k$ bars** (from $t-1$ to $t-k$) and the features are past **price-volume difference** defined below:
 
 | $t-1$ | $t-2$ | ... | $t-k$ |
 | :--- | :--- | :--- | :--- |
 | $Y_d(t-1)$ | $Y_d(t-2)$ | ... | $Y_d(t-k)$ |
 
-where $Y_d(τ) = \frac{Y(τ) - Y(τ-1)}{2}$
+where $Y_d(τ) = Δ(Y(τ))$ (the serial difference of $Y(τ)$);
 
 ---
 NOTE: This model was excluded from the final Meta-Model architecture due to high collinearity with the _Price-Angle Forecast_ described below which was empirically shown to provide a cleaner signal.

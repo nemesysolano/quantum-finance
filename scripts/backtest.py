@@ -1,8 +1,7 @@
 import sys
 from multiprocessing import Pool
-from qf.backtesting import simulate_trading_pd
-from qf.backtesting import simulate_trading_wd
-from qf.backtesting.pd import add_average_momentum
+from qf.backtesting import simulate_trading_yd
+from qf.backtesting import simulate_trading_el
 import qf.market as mkt
 import os
 import tensorflow as tf
@@ -77,12 +76,11 @@ def back_test(params):
     (k, ticker, interval, simulator_function, reward) = params  
     try:
         historical_dataset = mkt.import_market_data(ticker, interval, k)
-        historical_dataset = add_average_momentum(historical_dataset, k)
         historical_dataset['ATR'] = fracdiff.get_atr(historical_dataset['Close'], k)
         historical_dataset.dropna(inplace=True)
         y_test = historical_dataset['Close'].pct_change().shift(-1)
         y_test.dropna(inplace=True)    
-        physics_test = historical_dataset.loc[y_test.index, ['Ö', 'Öd', 'Ödd', 'ATR','E_High', 'E_Low', 'Close', 'High', 'Low',  'M', 'Mσ', 'R', 'W', 'Wd','Id', 'Yd']]
+        physics_test = historical_dataset.loc[y_test.index, ['Ö', 'Öd', 'Ödd', 'ATR','E_High', 'E_Low', 'Close', 'High', 'Low',  'M', 'Mσ', 'R', 'W', 'Wd','Id', 'Yd', 'Ydd','Pd']]
 
         equity_curve, cash, longs, shorts, winner_longs, winner_shorts, loser_longs, loser_shorts, transaction_log = simulator_function(ticker, y_test, physics_test, reward)    
         stats = create_backtest_stats(ticker, equity_curve, cash, longs, shorts, winner_longs, winner_shorts, loser_longs, loser_shorts)
@@ -92,7 +90,7 @@ def back_test(params):
         print(f"Error processing {ticker}: {e}")
         return None
     
-simulators = {"wd": simulate_trading_wd, "pd": simulate_trading_pd}
+simulators = {"el": simulate_trading_el, "yd": simulate_trading_yd}
 
 if __name__ == '__main__':
     tickers_file = sys.argv[1]    
@@ -122,7 +120,7 @@ if __name__ == '__main__':
 
             with open(transactions_file, 'w') as t: #
                 print(
-                    "Ticker,Trade ID,Entry Index,Exit Index,Duration,Side,Entry Price,Exit Price,PL,TP Price,SL Price,Exit Reason", 
+                    "Ticker,Trade ID,Entry Index,Exit Index,Duration,Side,Entry Price,Exit Price,PL,TP Price,SL Price,Exit Reason,Friction", 
                     file=t)
                 for transaction in transaction_log:
-                    print(f"{transaction.ticker},{transaction.trade_id},{transaction.entry_index},{transaction.exit_index},{transaction.duration},{transaction.side},{transaction.entry_price:.2f},{transaction.exit_price:.2f},{transaction.pl:.2f},{transaction.tp_price:.2f},{transaction.sl_price:.2f},{transaction.exit_reason}", file=t)
+                    print(f"{transaction.ticker},{transaction.trade_id},{transaction.entry_index},{transaction.exit_index},{transaction.duration},{transaction.side},{transaction.entry_price:.2f},{transaction.exit_price:.2f},{transaction.pl:.2f},{transaction.tp_price:.2f},{transaction.sl_price:.2f},{transaction.exit_reason},{transaction.friction_at_entry:.2f}", file=t)

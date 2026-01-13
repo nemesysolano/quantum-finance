@@ -1,2 +1,2 @@
-from .wd import simulate_trading_wd
-from .pd import simulate_trading_pd, add_average_momentum
+from .el import simulate_trading_el
+from .yd import simulate_trading_yd
