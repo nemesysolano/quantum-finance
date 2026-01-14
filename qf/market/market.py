@@ -57,7 +57,7 @@ def import_market_data(symbol, interval, lookback_periods = 14):
         add_price_time_angles(historical_data)
         add_wavelets(historical_data, lookback_periods)
         add_probability_differences(historical_data)
-        add_quantum_indicators(ticker, historical_data, market_type, lookback_periods)
+        add_quantum_indicators(ticker, historical_data, market_type, lookback_periods, 'λ', 'Close', 'E_Low', 'E_High', 'Ö')
         add_bar_inbalance(historical_data)
         add_average_momentum(historical_data, lookback_periods)
         historical_data.to_csv(output_path)
@@ -83,7 +83,7 @@ def import_maket_data_cycle(args):
 
 def import_market_all_data(quantization_level, interval, lookback_periods):    
     module_dir = os.path.dirname(__file__)
-    stock_listing_file = os.path.join(module_dir, 'stocks-minimal.txt')
+    stock_listing_file = os.path.join(module_dir, 'stocks.txt')
     pool = Pool(processes=4)
     with open(stock_listing_file, 'r') as f:
         symbols = [line.strip() for line in f]

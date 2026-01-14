@@ -283,13 +283,13 @@ is the minimum amount of differentiation that makes a price series stationary wh
 
 ### Differentiated Time Series ###
 
-Let's consider the $X=\{L(x(t-k)), L(x(t-k+1)),..., L(x(t-1))\}$ sequence of **logarithmic differences**, we can aproximate $L(x(t))$ from past $k$ observations of $L$ by
+Let's consider the $L=\{L(x(t-k)), L(x(t-k+1)),..., L(x(t-1))\}$ sequence of **logarithmic differences**, we can aproximate $L(x(t))$ from past $k$ observations of $L$ by
 
-$L(x(t)) ≈ \sum^k_{i=1}w_i L(x(t-i))$ where
+$\hat L(x(t)) ≈ L(x(t)) =\sum^k_{i=1}w_i L(x(t-i))$ where
 
 $w_0 = 1$ and $w_i = w_{i-1} \frac {i - 1 - d} {i}$
 
-The $\hat X$ time series will be called **differentiated time series** Let's comment on some corner cases
+The $L$ time series will be called **differentiated time series** Let's comment on some corner cases
 
 * **$d = 0$**: For $d=0$, all weights $w_i$ are 0 except for $w_0=1$. That is the case where the differentiated series coincides with the original one.
 * **$d = 1$**: For $d=1$, all weights $w_i$ are 0 except for $w_0=1$ and $w_1=-1$. That is the standard first-order integer differentiation, which is used to derive log-price returns.
@@ -302,11 +302,11 @@ The `estimate_d` function estimates the fractional integration parameter  from a
 
 ##### 1. The Model
 
-We assume the time series  is governed by a fractional process of order , which can be aproimated as a linear combination of its past  values:
+We assume the time series  is governed by a fractional process of order, which can be aproimated as a linear combination of its past  values:
 
-$L(x(t)) ≈ \sum^k_{i=1}w_i L(x(t-i))$
+$\hat L(x(t)) ≈ \hat L(x(t)) = \sum^k_{i=1}w_i L(x(t-i))$
 
-where the weights  are defined by the binomial recurrence relation:
+where the weights are defined by the binomial recurrence relation:
 
 $w_1 = 1$
 
@@ -333,7 +333,6 @@ To ensure high precision, the function utilizes an **Integer-Stripping** techniq
 * If the series is non-stationary ($d ≥ 1$), it calculates on the first-order difference $Δx(t)$.
 * The final result is then reconstructed as $d_{\text {total}}=d_{\text {estimated}} + 1$.
 * This keeps the core math in the stable $(0,1)$  range where the "memory signature" is most distinct from noise.
-
 
 ## Baseline Forecast Models ##
 
@@ -527,11 +526,11 @@ where:
 
 #### The Schrödinger Gauge Difference #### 
 
-$Ö_d(t) = Ö(t) - Ö(t-1)$
+$Ö_d(t) = L(Ö(t))$, which can be approximated as $\hat L(Ö(t))$
 
 #### The Schrödinger Gauge Acceleration #### 
 
-$Ö_a(t) = Ö_a(t) - Ö_a(t-1)$
+$Ö_a(t) = L(Ö_d(t))$, also denoted as $Ö_{dd}$ and aproximated using $\hat L(Ö_d(t))$
 
 ## Quantum Forecast Models ##
 

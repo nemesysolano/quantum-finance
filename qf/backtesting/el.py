@@ -31,7 +31,6 @@ def simulate_trading_el(ticker, y_test, physics_test, reward, initial_cap=10000)
         price = price_values[i]
         atr = atr_values[i]
         friction = price * dynamic_slippage(atr/price)
-        threshold = int(np.sign(o_d[i]) * np.sign(o_dd[i]))
         net_pl = 0
         exit_reason = 0
 
@@ -58,7 +57,7 @@ def simulate_trading_el(ticker, y_test, physics_test, reward, initial_cap=10000)
                         net_pl = (pos.amount * reward) - pos.friction_at_entry
                         winner_longs += 1
                         exit_signal = True
-                    elif  Id[i] > 0 and W[i] > 0 or price > e_high[i]: # Momentum Reversal
+                    elif o_d[i] < 0: # Momentum Reversal
                         exit_price = price
                         exit_reason = 0
                         realized_r = (exit_price - pos.entry_price)
@@ -79,7 +78,7 @@ def simulate_trading_el(ticker, y_test, physics_test, reward, initial_cap=10000)
                         net_pl = (pos.amount * reward) - pos.friction_at_entry
                         winner_shorts += 1
                         exit_signal = True
-                    elif  Id[i] > 0 and W[i] > 0 or price < e_low[i]: # Momentum Reversal
+                    elif o_d[i] > 0: # Momentum Reversal
                         exit_price = price
                         exit_reason = 0
                         realized_r = (pos.entry_price - exit_price)
@@ -111,7 +110,7 @@ def simulate_trading_el(ticker, y_test, physics_test, reward, initial_cap=10000)
             # LONG SIGNAL
             tp_dist = e_high[i] - price
             sl_dist = price - e_low[i]
-            if np.abs(tp_dist/sl_dist) < reward:
+            if np.abs(tp_dist/sl_dist) < reward and o_dd[i] > 0:
                 longs += 1
                 active_position = Position(
                     ticker=ticker, entry_index=i, entry_price=price,
@@ -121,7 +120,7 @@ def simulate_trading_el(ticker, y_test, physics_test, reward, initial_cap=10000)
                 # SHORT SIGNAL
                 tp_dist = price - e_low[i]
                 sl_dist = e_high[i] - price
-                if np.abs(tp_dist/sl_dist) < reward:
+                if np.abs(tp_dist/sl_dist) < reward and o_dd[i] < 0:
                     shorts += 1
                     active_position = Position(
                         ticker=ticker, entry_index=i, entry_price=price,

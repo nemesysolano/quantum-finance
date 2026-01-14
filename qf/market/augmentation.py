@@ -480,95 +480,6 @@ def add_probability_differences(historical_data):
     df.dropna(inplace=True)
     return df
 
-def add_quantum_lambda(ticker, historical_data, lookback_periods):
-    """
-    Calculates the quantum lambda (λ) using an fixed window to prevent data leakage.
-    Uses the logarithmic filter of the squared serial difference of the close price.
-    """
-    df = historical_data
-    n = len(df)
-    lambdas = np.full(n, np.nan)
-    
-    # 1. Calculate filtered returns: rho(Delta^2(Close, 1))
-    c = df['Close'].values
-    c_prev = df['Close'].shift(1).values
-    return_p = np.log(c / c_prev)
-    
-    # 2. Fixed window calculation (using data from T up to t-1 for bar t)
-    T = 1
-    for t in range(lookback_periods, n):      
-        lambdas[t] = quantum_lambda(return_p[T:t])# [T:t]
-        T += 1
-        
-    df['λ'] = lambdas   
-    df.dropna(inplace=True)        
-    return df
-
-def add_boundary_energy_levels(df, market_type, window): # Fixed Critical Leakage, Jan 8 2026
-    """
-    STRICTLY CAUSAL Rolling Energy Levels.
-    Ensures that energy walls for bar t are determined ONLY by data up to t-1.
-    """
-    # Use .shift(1) to ensure the rolling window EXCLUDES the current bar
-    df['Rolling_Max'] = df['Close'].shift(1).rolling(window=window).max()
-    df['Rolling_Min'] = df['Close'].shift(1).rolling(window=window).min()
-
-    # Calculate energy levels row-by-row using the shifted extremes
-    # This makes E_High and E_Low known at the Open of bar t.
-    df['E_Low'] = df.apply(lambda x: maximum_energy_level(x['Rolling_Max'], x['λ'], market_type), axis=1)
-    df['E_High'] = df.apply(lambda x: minimum_energy_level(x['Rolling_Min'], x['λ']), axis=1)
-
-    df.drop(columns=['Rolling_Max', 'Rolling_Min'], inplace=True)
-    df.dropna(inplace=True)
-    return df
-
-def add_scrodinger_gauge(historical_data):
-    """
-    Calculates the Schrödinger Gauge (Ö) based on the current price 
-    and the quantum boundary energy levels.
-    
-    Formula: $Ö(t) = log (C(t) sqrt(E_{low}(t) * E_{high}(t)$
-    
-    Args:
-        historical_data (pd.DataFrame): Dataframe containing 'Close', 
-                                       'E_Low', and 'E_High'.
-        
-    Returns:
-        pd.DataFrame: Dataframe with the added 'Ö' column.
-    """
-    df = historical_data
-    
-    # Extract components
-    c = df['Close'].values
-    e_low = df['E_Low'].values
-    e_high = df['E_High'].values
-    
-    e_equilibrium = np.sqrt(e_low * e_high)
-    df['Ö'] = np.log(c / e_equilibrium)
-    df.dropna(inplace=True)
-    
-    return df
-
-def add_scrodinger_gauge_differences(historical_data, k):
-    """
-    Calculates the Schrödinger Gauge Difference (Öd).
-    
-    Formula: Öd(t) = [Ö(t) - Ö(t-1)] / 2
-    
-    Args:
-        historical_data (pd.DataFrame): Dataframe containing the 'Ö' column.
-        
-    Returns:
-        pd.DataFrame: Dataframe with the added 'Öd' column.
-    """
-    df = historical_data
-    
-    add_diff_time_series(historical_data, 'Ö', 'Öd', k)
-    df.dropna(inplace=True)
-    add_diff_time_series(df, 'Öd', 'Ödd', k)
-    df.dropna(inplace=True)
-    return df
-
 def add_average_momentum(historical_data, k=14):
     """
     Calculates Average Momentum M(t) and its Signal Line Mσ (EMA).
@@ -609,11 +520,100 @@ def add_average_momentum(historical_data, k=14):
     
     return df
 
-def add_quantum_indicators(ticker, historical_data, market_type, lookback_periods):
+def add_quantum_lambda(ticker, historical_data, lookback_periods, lambda_label, source_column):
+    """
+    Calculates the quantum lambda (λ) using an fixed window to prevent data leakage.
+    Uses the logarithmic filter of the squared serial difference of the close price.
+    """
+    df = historical_data
+    n = len(df)
+    lambdas = np.full(n, np.nan)
+    
+    # 1. Calculate filtered returns: rho(Delta^2(Close, 1))
+    c = df[source_column].values
+    c_prev = df[source_column].shift(1).values
+    return_p = np.log(c / c_prev)
+    
+    # 2. Fixed window calculation (using data from T up to t-1 for bar t)
+    T = 1
+    for t in range(lookback_periods, n):      
+        lambdas[t] = quantum_lambda(return_p[T:t])# [T:t]
+        T += 1
+        
+    df[lambda_label] = lambdas   
+    df.dropna(inplace=True)        
+    return df
+
+def add_boundary_energy_levels(df, market_type, window, lambda_label, source_column, e_low_label, e_high_label): # Fixed Critical Leakage, Jan 8 2026
+    """
+    STRICTLY CAUSAL Rolling Energy Levels.
+    Ensures that energy walls for bar t are determined ONLY by data up to t-1.
+    """
+    # Use .shift(1) to ensure the rolling window EXCLUDES the current bar
+    df['Rolling_Max'] = df[source_column].shift(1).rolling(window=window).max()
+    df['Rolling_Min'] = df[source_column].shift(1).rolling(window=window).min()
+
+    # Calculate energy levels row-by-row using the shifted extremes
+    # This makes E_High and E_Low known at the Open of bar t.
+    df[e_low_label] = df.apply(lambda x: maximum_energy_level(x['Rolling_Max'], x[lambda_label], market_type), axis=1)
+    df[e_high_label] = df.apply(lambda x: minimum_energy_level(x['Rolling_Min'], x[lambda_label]), axis=1)
+
+    df.drop(columns=['Rolling_Max', 'Rolling_Min'], inplace=True)
+    df.dropna(inplace=True)
+    return df
+
+def add_scrodinger_gauge(historical_data, source_column, e_low_label, e_high_label, indicator_label):
+    """
+    Calculates the Schrödinger Gauge (Ö) based on the current price 
+    and the quantum boundary energy levels.
+    
+    Formula: $Ö(t) = log (C(t) sqrt(E_{low}(t) * E_{high}(t)$
+    
+    Args:
+        historical_data (pd.DataFrame): Dataframe containing 'Close', 
+                                       'E_Low', and 'E_High'.
+        
+    Returns:
+        pd.DataFrame: Dataframe with the added 'Ö' column.
+    """
+    df = historical_data
+    
+    # Extract components
+    c = df[source_column].values
+    e_low = df[e_low_label].values
+    e_high = df[e_high_label].values
+
+    e_equilibrium = np.sqrt(e_low * e_high)
+    df[indicator_label] = np.log(c / e_equilibrium)
+    df.dropna(inplace=True)
+    
+    return df
+
+def add_scrodinger_gauge_differences(historical_data, k, indicator_label): 
+    """
+    Calculates the Schrödinger Gauge Difference (Öd).
+    
+    Formula: Öd(t) = [Ö(t) - Ö(t-1)] / 2
+    
+    Args:
+        historical_data (pd.DataFrame): Dataframe containing the 'Ö' column.
+        
+    Returns:
+        pd.DataFrame: Dataframe with the added 'Öd' column.
+    """
+    df = historical_data
+
+    add_diff_time_series(historical_data, indicator_label, f"{indicator_label}d", k)
+    df.dropna(inplace=True)
+    add_diff_time_series(df, f"{indicator_label}d", f"{indicator_label}dd", k)
+    df.dropna(inplace=True)
+    return df
+
+def add_quantum_indicators(ticker, historical_data, market_type, lookback_periods, lambda_label, source_column, e_low_label, e_high_label, indicator_label):
     """
     Wrapper function to add all quantum indicators to the historical data.
     """
-    add_quantum_lambda(ticker, historical_data, lookback_periods)
-    add_boundary_energy_levels(historical_data,market_type, lookback_periods)
-    add_scrodinger_gauge(historical_data)
-    add_scrodinger_gauge_differences(historical_data, lookback_periods)
+    add_quantum_lambda(ticker, historical_data, lookback_periods, lambda_label, source_column)
+    add_boundary_energy_levels(historical_data,market_type, lookback_periods, lambda_label, source_column, e_low_label, e_high_label)
+    add_scrodinger_gauge(historical_data, source_column, e_low_label, e_high_label, indicator_label)
+    add_scrodinger_gauge_differences(historical_data, lookback_periods, indicator_label)
